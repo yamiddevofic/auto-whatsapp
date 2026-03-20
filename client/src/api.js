@@ -182,6 +182,14 @@ export async function cancelDirectMessage(id) {
   return res.json();
 }
 
+export async function sendDirectMessageNow(formData) {
+  const res = await fetch(`${BASE}/api/direct-messages/send-now`, {
+    method: 'POST',
+    body: formData,
+  });
+  return res.json();
+}
+
 export async function deleteDirectMessageApi(id) {
   const res = await fetch(`${BASE}/api/direct-messages/${id}/permanent`, {
     method: 'DELETE',

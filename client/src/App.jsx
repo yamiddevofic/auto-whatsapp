@@ -8,6 +8,7 @@ import StatusList from './components/StatusList.jsx';
 import ContactList from './components/ContactList.jsx';
 import AgendaList from './components/AgendaList.jsx';
 import DirectMessageList from './components/DirectMessageList.jsx';
+import QuickMessageForm from './components/QuickMessageForm.jsx';
 import { fetchStatus, fetchGroups, fetchMessages, fetchStatusUpdates } from './api.js';
 
 const styles = {
@@ -90,6 +91,8 @@ export default function App() {
     setStatusUpdates(updates);
   }, []);
 
+
+
   useEffect(() => {
     const poll = setInterval(async () => {
       const { status: s } = await fetchStatus();
@@ -137,6 +140,12 @@ export default function App() {
           onClick={() => setActiveTab('contacts')}
         >
           Contactos de grupos
+        </button>
+        <button
+          style={activeTab === 'quick' ? styles.tabActive : styles.tab}
+          onClick={() => setActiveTab('quick')}
+        >
+          Mensaje rapido
         </button>
         <button
           style={activeTab === 'agenda' ? styles.tabActive : styles.tab}
@@ -190,6 +199,20 @@ export default function App() {
             <h2 style={styles.sectionTitle}>Contactos de grupos</h2>
             <ContactList />
           </div>
+          <div style={styles.section}>
+            <h2 style={styles.sectionTitle}>Mensajes directos programados</h2>
+            <DirectMessageList />
+          </div>
+        </>
+      )}
+
+      {activeTab === 'quick' && (
+        <>
+          <div style={styles.section}>
+            <h2 style={styles.sectionTitle}>Enviar mensaje a numeros</h2>
+            <QuickMessageForm />
+          </div>
+
           <div style={styles.section}>
             <h2 style={styles.sectionTitle}>Mensajes directos programados</h2>
             <DirectMessageList />

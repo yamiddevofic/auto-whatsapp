@@ -13,14 +13,26 @@ router.get('/api/status-updates', (req, res) => {
 router.post('/api/status-updates/send-now', async (req, res) => {
   try {
     const { content } = req.body;
-    const imagePath = req.file ? req.file.path : null;
+    const imagePaths = (req.files || []).map((f) => f.path);
 
-    if (!content && !imagePath) {
+    if (!content && imagePaths.length === 0) {
       return res.status(400).json({ error: 'Se requiere texto o imagen' });
     }
 
-    console.log('[StatusUpdate] Sending now:', { content: content?.substring(0, 30), imagePath });
-    await sendStatusUpdate(content || null, imagePath);
+    if (imagePaths.length <= 1) {
+      // Single image or text-only
+      const imagePath = imagePaths[0] || null;
+      console.log('[StatusUpdate] Sending now:', { content: content?.substring(0, 30), imagePath });
+      await sendStatusUpdate(content || null, imagePath);
+    } else {
+      // Multiple images — send one by one in order
+      for (let i = 0; i < imagePaths.length; i++) {
+        const caption = i === 0 ? (content || null) : null;
+        console.log(`[StatusUpdate] Sending image ${i + 1}/${imagePaths.length}:`, imagePaths[i]);
+        await sendStatusUpdate(caption, imagePaths[i]);
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error('[StatusUpdate] Send now failed:', err.message);
@@ -36,20 +48,40 @@ router.post('/api/status-updates', (req, res) => {
       return res.status(400).json({ error: 'Se requiere fecha y hora de envio' });
     }
 
-    const imagePath = req.file ? req.file.path : null;
+    const imagePaths = (req.files || []).map((f) => f.path);
 
-    if (!content && !imagePath) {
+    if (!content && imagePaths.length === 0) {
       return res.status(400).json({ error: 'Se requiere texto o imagen' });
     }
 
-    const su = createStatusUpdate({
-      content: content || null,
-      imagePath,
-      scheduledAt,
-    });
+    const created = [];
 
-    scheduleStatusUpdateJob(su);
-    res.status(201).json(su);
+    if (imagePaths.length <= 1) {
+      // Single image or text-only
+      const su = createStatusUpdate({
+        content: content || null,
+        imagePath: imagePaths[0] || null,
+        scheduledAt,
+      });
+      scheduleStatusUpdateJob(su);
+      created.push(su);
+    } else {
+      // Multiple images — create one status per image, staggered by 5 seconds
+      const baseTime = new Date(scheduledAt).getTime();
+      for (let i = 0; i < imagePaths.length; i++) {
+        const staggeredTime = new Date(baseTime + i * 5000).toISOString();
+        const caption = i === 0 ? (content || null) : null;
+        const su = createStatusUpdate({
+          content: caption,
+          imagePath: imagePaths[i],
+          scheduledAt: staggeredTime,
+        });
+        scheduleStatusUpdateJob(su);
+        created.push(su);
+      }
+    }
+
+    res.status(201).json({ success: true, count: created.length, items: created });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

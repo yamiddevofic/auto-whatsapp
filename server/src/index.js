@@ -56,7 +56,7 @@ app.use('/api/messages', (req, res, next) => {
 
 app.use('/api/status-updates', (req, res, next) => {
   if (req.method === 'POST') {
-    upload.single('image')(req, res, next);
+    upload.array('images', 20)(req, res, next);
   } else {
     next();
   }

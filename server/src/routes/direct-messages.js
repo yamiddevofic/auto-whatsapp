@@ -16,6 +16,8 @@ router.post('/api/direct-messages/send-now', async (req, res) => {
     let { numbers, content } = req.body;
     const imagePath = req.file ? req.file.path : null;
 
+    console.log('[DirectMessages] send-now body:', { numbers, content: content?.substring(0, 30), imagePath });
+
     if (!content && !imagePath) {
       return res.status(400).json({ error: 'Se requiere texto o imagen' });
     }
@@ -32,15 +34,19 @@ router.post('/api/direct-messages/send-now', async (req, res) => {
     // Validate each number on WhatsApp and collect JIDs
     const results = [];
     for (const num of numbers) {
+      console.log(`[DirectMessages] Checking number: ${num}`);
       const jid = await checkOnWhatsApp(num);
       if (jid) {
         try {
-          await sendMessage(jid, content || '', imagePath);
+          console.log(`[DirectMessages] Sending to ${jid}`);
+          await sendMessage(jid, content || null, imagePath);
           results.push({ number: num, status: 'sent' });
         } catch (err) {
+          console.error(`[DirectMessages] Failed to send to ${jid}:`, err.message);
           results.push({ number: num, status: 'failed', error: err.message });
         }
       } else {
+        console.log(`[DirectMessages] Number not found on WhatsApp: ${num}`);
         results.push({ number: num, status: 'not_found', error: 'Numero no encontrado en WhatsApp' });
       }
     }

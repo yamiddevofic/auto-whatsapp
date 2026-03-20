@@ -216,8 +216,10 @@ export async function sendMessage(groupId, content, imagePath) {
       image: fs.readFileSync(imagePath),
       caption: content || undefined,
     });
-  } else {
+  } else if (content) {
     await sock.sendMessage(groupId, { text: content });
+  } else {
+    throw new Error('Message must have text or image');
   }
 }
 

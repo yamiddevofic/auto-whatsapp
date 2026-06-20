@@ -99,11 +99,21 @@ export default function App() {
     if (token) {
       setIsAuthenticated(true);
     }
+
+    // Listen for auth-expired event
+    const handleAuthExpired = () => {
+      setIsAuthenticated(false);
+    };
+
+    window.addEventListener('auth-expired', handleAuthExpired);
+    return () => window.removeEventListener('auth-expired', handleAuthExpired);
   }, []);
 
 
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     const poll = setInterval(async () => {
       const { status: s } = await fetchStatus();
       setStatus(s);
@@ -123,7 +133,7 @@ export default function App() {
       clearInterval(msgPoll);
       clearInterval(statusPoll);
     };
-  }, [groups.length, refreshMessages, refreshStatusUpdates]);
+  }, [groups.length, refreshMessages, refreshStatusUpdates, isAuthenticated]);
 
   return (
     <>

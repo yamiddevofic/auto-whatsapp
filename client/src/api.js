@@ -17,10 +17,11 @@ async function authFetch(url, options = {}) {
   });
 
   if (response.status === 401) {
-    // Token expired or invalid, clear and redirect
+    // Token expired or invalid, clear and let React handle redirect
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    // Dispatch custom event to notify app of logout
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
 
@@ -70,7 +71,7 @@ export async function createMessage(formData) {
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
   return res.json();
@@ -120,7 +121,7 @@ export async function createStatusUpdate(formData) {
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
   return res.json();
@@ -136,7 +137,7 @@ export async function sendStatusNow(formData) {
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
   return res.json();
@@ -230,7 +231,7 @@ export async function importAgendaVCF(file) {
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
   return res.json();
@@ -264,7 +265,7 @@ export async function createDirectMessage(formData) {
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
   return res.json();
@@ -288,7 +289,7 @@ export async function sendDirectMessageNow(formData) {
   if (res.status === 401) {
     localStorage.removeItem('token');
     localStorage.removeItem('username');
-    window.location.href = '/';
+    window.dispatchEvent(new Event('auth-expired'));
     return null;
   }
   return res.json();

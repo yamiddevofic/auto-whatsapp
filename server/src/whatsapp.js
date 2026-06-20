@@ -11,6 +11,7 @@ import config from './config.js';
 import { saveContacts, savePushName, updateContactGroups, getAllContactJids, getContactCount } from './contacts.js';
 import { getAgendaWhatsAppJids } from './agenda.js';
 import { io } from './index.js';
+import { createPublishedStatus } from './db.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -377,6 +378,9 @@ export async function sendStatusUpdate(content, imagePath) {
       statusJidList,
     });
     console.log(`[WhatsApp] Status posted successfully`);
+    
+    // Save published status to database
+    createPublishedStatus({ content, imagePath });
   } catch (err) {
     console.error(`[WhatsApp] Failed to send status:`, err.message);
     throw err;

@@ -8,25 +8,27 @@ export function initAgendaTable() {
       jid TEXT,
       on_whatsapp INTEGER DEFAULT 0,
       checked_at TEXT,
-      imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+      imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+      user_id TEXT NOT NULL DEFAULT 'default'
     )
   `);
 }
 
-export function importAgendaContacts(contactsList) {
+export function importAgendaContacts(contactsList, userId = 'default') {
   if (contactsList.length === 0) return 0;
 
   const stmt = db.prepare(`
-    INSERT INTO agenda_contacts (phone, name, imported_at)
-    VALUES (?, ?, datetime('now'))
+    INSERT INTO agenda_contacts (phone, name, imported_at, user_id)
+    VALUES (?, ?, datetime('now'), ?)
     ON CONFLICT(phone) DO UPDATE SET
       name = excluded.name,
-      imported_at = datetime('now')
+      imported_at = datetime('now'),
+      user_id = excluded.user_id
   `);
 
   const tx = db.transaction((list) => {
     for (const c of list) {
-      stmt.run(c.phone, c.name);
+      stmt.run(c.phone, c.name, userId);
     }
   });
 

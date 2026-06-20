@@ -160,6 +160,15 @@ export async function initDatabase() {
     )
   `);
 
+  _raw.exec(`
+    CREATE TABLE IF NOT EXISTS published_statuses (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      content TEXT,
+      image_path TEXT,
+      published_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   save();
   return db;
 }
@@ -355,6 +364,37 @@ export function canSendMoreMessages(count = 1) {
   const stats = getTodayMessageStats();
   const limit = getDailyLimit();
   return (stats.messages_sent + count) <= limit;
+}
+
+// --- Published statuses CRUD ---
+
+export function createPublishedStatus({ content, imagePath }) {
+  const result = db.prepare(
+    `INSERT INTO published_statuses (content, image_path)
+     VALUES (?, ?)`
+  ).run(content, imagePath);
+  return getPublishedStatusById(result.lastInsertRowid);
+}
+
+export function getAllPublishedStatuses() {
+  return db.prepare('SELECT * FROM published_statuses ORDER BY published_at DESC').all();
+}
+
+export function getPublishedStatusById(id) {
+  return db.prepare('SELECT * FROM published_statuses WHERE id = ?').get(id);
+}
+
+export function deletePublishedStatus(id) {
+  const status = getPublishedStatusById(id);
+  if (!status) return null;
+  
+  // Delete image file if exists
+  if (status.image_path && fs.existsSync(status.image_path)) {
+    fs.unlinkSync(status.image_path);
+  }
+  
+  db.prepare('DELETE FROM published_statuses WHERE id = ?').run(id);
+  return status;
 }
 
 export default db;

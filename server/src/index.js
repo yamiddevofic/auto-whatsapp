@@ -20,6 +20,7 @@ import statusUpdatesRoutes from './routes/status-updates.js';
 import contactsRoutes from './routes/contacts.js';
 import agendaRoutes from './routes/agenda.js';
 import directMessagesRoutes from './routes/direct-messages.js';
+import publishedStatusesRoutes from './routes/published-statuses.js';
 
 // Ensure uploads dir exists
 fs.mkdirSync(config.uploadsDir, { recursive: true });
@@ -119,6 +120,7 @@ app.use(statusUpdatesRoutes);
 app.use(contactsRoutes);
 app.use(agendaRoutes);
 app.use(directMessagesRoutes);
+app.use(publishedStatusesRoutes);
 
 // Serve uploaded images
 app.use('/uploads', express.static(config.uploadsDir));

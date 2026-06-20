@@ -7,12 +7,19 @@ export function initContactsTable() {
       name TEXT,
       notify TEXT,
       groups_list TEXT,
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      user_id TEXT NOT NULL DEFAULT 'default'
     )
   `);
 
   try {
     db.exec(`ALTER TABLE contacts ADD COLUMN groups_list TEXT`);
+  } catch {
+    // column already exists
+  }
+
+  try {
+    db.exec(`ALTER TABLE contacts ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'`);
   } catch {
     // column already exists
   }

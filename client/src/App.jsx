@@ -11,7 +11,8 @@ import ContactList from './components/ContactList.jsx';
 import AgendaList from './components/AgendaList.jsx';
 import DirectMessageList from './components/DirectMessageList.jsx';
 import QuickMessageForm from './components/QuickMessageForm.jsx';
-import { fetchStatus, fetchGroups, fetchMessages, fetchStatusUpdates, fetchDirectMessages } from './api.js';
+import PublishedStatusList from './components/PublishedStatusList.jsx';
+import { fetchStatus, fetchGroups, fetchMessages, fetchStatusUpdates, fetchDirectMessages, fetchPublishedStatuses } from './api.js';
 
 const styles = {
   app: {
@@ -80,6 +81,8 @@ export default function App() {
   const [groups, setGroups] = useState([]);
   const [messages, setMessages] = useState([]);
   const [statusUpdates, setStatusUpdates] = useState([]);
+  const [directMessages, setDirectMessages] = useState([]);
+  const [publishedStatuses, setPublishedStatuses] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [activeTab, setActiveTab] = useState('messages');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -119,6 +122,7 @@ export default function App() {
     refreshMessages();
     refreshStatusUpdates();
     fetchDirectMessages().then(setDirectMessages);
+    fetchPublishedStatuses().then(setPublishedStatuses);
 
     // WebSocket connection
     const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3001');
@@ -149,6 +153,11 @@ export default function App() {
     // Listen for direct messages updates
     socket.on('direct-messages:updated', (directMsgs) => {
       setDirectMessages(directMsgs);
+    });
+
+    // Listen for published statuses updates
+    socket.on('published-statuses:updated', (publishedStatuses) => {
+      setPublishedStatuses(publishedStatuses);
     });
 
     return () => {
@@ -216,6 +225,12 @@ export default function App() {
           onClick={() => setActiveTab('agenda')}
         >
           Contactos de agenda
+        </button>
+        <button
+          style={activeTab === 'published' ? styles.tabActive : styles.tab}
+          onClick={() => setActiveTab('published')}
+        >
+          Estados publicados
         </button>
       </div>
 
@@ -295,6 +310,16 @@ export default function App() {
             <DirectMessageList />
           </div>
         </>
+      )}
+
+      {activeTab === 'published' && (
+        <div style={styles.section}>
+          <h2 style={styles.sectionTitle}>Estados publicados</h2>
+          <PublishedStatusList
+            statuses={publishedStatuses}
+            onDelete={() => fetchPublishedStatuses().then(setPublishedStatuses)}
+          />
+        </div>
       )}
         </div>
       )}

@@ -318,3 +318,17 @@ export async function deleteAgenda() {
   if (!res) return null;
   return res.json();
 }
+
+export async function fetchPublishedStatuses() {
+  const res = await authFetch(`${BASE}/api/published-statuses`);
+  if (!res) return [];
+  return res.json();
+}
+
+export async function deletePublishedStatusApi(id) {
+  const res = await authFetch(`${BASE}/api/published-statuses/${id}`, {
+    method: 'DELETE',
+  });
+  if (!res) return null;
+  return res.json();
+}

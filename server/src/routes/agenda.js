@@ -63,7 +63,8 @@ router.post('/api/agenda/import', (req, res) => {
       return res.status(400).json({ error: 'No se encontraron contactos en el archivo VCF' });
     }
 
-    const count = importAgendaContacts(contacts);
+    const userId = req.user?.username || 'default';
+    const count = importAgendaContacts(contacts, userId);
     res.json({ success: true, imported: count });
   } catch (err) {
     res.status(500).json({ error: err.message });

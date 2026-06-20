@@ -1,35 +1,37 @@
 import db from './db.js';
 
-// Table for address book contacts imported from VCF
-db.exec(`
-  CREATE TABLE IF NOT EXISTS agenda_contacts (
-    phone TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    jid TEXT,
-    on_whatsapp INTEGER DEFAULT 0,
-    checked_at TEXT,
-    imported_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )
-`);
+export function initAgendaTable() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agenda_contacts (
+      phone TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      jid TEXT,
+      on_whatsapp INTEGER DEFAULT 0,
+      checked_at TEXT,
+      imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+}
 
-const upsertStmt = db.prepare(`
-  INSERT INTO agenda_contacts (phone, name, imported_at)
-  VALUES (?, ?, datetime('now'))
-  ON CONFLICT(phone) DO UPDATE SET
-    name = excluded.name,
-    imported_at = datetime('now')
-`);
+export function importAgendaContacts(contactsList) {
+  if (contactsList.length === 0) return 0;
 
-const upsertMany = db.transaction((contacts) => {
-  for (const c of contacts) {
-    upsertStmt.run(c.phone, c.name);
-  }
-});
+  const stmt = db.prepare(`
+    INSERT INTO agenda_contacts (phone, name, imported_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(phone) DO UPDATE SET
+      name = excluded.name,
+      imported_at = datetime('now')
+  `);
 
-export function importAgendaContacts(contacts) {
-  if (contacts.length === 0) return 0;
-  upsertMany(contacts);
-  return contacts.length;
+  const tx = db.transaction((list) => {
+    for (const c of list) {
+      stmt.run(c.phone, c.name);
+    }
+  });
+
+  tx(contactsList);
+  return contactsList.length;
 }
 
 export function getAllAgendaContacts() {

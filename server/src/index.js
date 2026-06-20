@@ -4,6 +4,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import config from './config.js';
+import { initDatabase } from './db.js';
+import { initContactsTable } from './contacts.js';
+import { initAgendaTable } from './agenda.js';
 import { initWhatsApp } from './whatsapp.js';
 import { loadPendingMessages } from './scheduler.js';
 import statusRoutes from './routes/status.js';
@@ -123,6 +126,9 @@ process.on('unhandledRejection', (reason) => {
 
 // Start
 async function start() {
+  await initDatabase();
+  initContactsTable();
+  initAgendaTable();
   await initWhatsApp();
   loadPendingMessages();
   app.listen(config.port, '0.0.0.0', () => {

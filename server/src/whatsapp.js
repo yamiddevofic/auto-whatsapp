@@ -349,14 +349,22 @@ export async function sendStatusUpdate(content, imagePath) {
   // Obtener lista de contactos para la audiencia del estado (agenda + grupos)
   const agendaJids = getAgendaWhatsAppJids();
   const groupJids = getAllContactJids();
+  
+  // Incluir el propio usuario para que el estado aparezca para él
+  const userJid = sock.user?.id;
+  if (userJid) {
+    console.log(`[WhatsApp] Including self in status audience: ${userJid}`);
+  }
+  
   // Combinar y eliminar duplicados usando Set
-  const statusJidList = [...new Set([...agendaJids, ...groupJids])];
+  const statusJidList = [...new Set([...agendaJids, ...groupJids, ...(userJid ? [userJid] : [])])];
   
   if (statusJidList.length === 0) {
     throw new Error('No hay contactos guardados para mostrar el estado');
   }
 
-  console.log(`[WhatsApp] Status will be visible to ${statusJidList.length} contacts (${agendaJids.length} from agenda, ${groupJids.length} from groups)`);
+  console.log(`[WhatsApp] Status will be visible to ${statusJidList.length} contacts (${agendaJids.length} from agenda, ${groupJids.length} from groups${userJid ? ', 1 self' : ''})`);
+  console.log(`[WhatsApp] Status JIDs: ${statusJidList.slice(0, 10).join(', ')}${statusJidList.length > 10 ? '...' : ''}`);
 
   let msgContent;
   if (imagePath && fs.existsSync(imagePath)) {

@@ -125,13 +125,11 @@ app.use(publishedStatusesRoutes);
 // Serve uploaded images
 app.use('/uploads', express.static(config.uploadsDir));
 
-// In production, serve React build
-if (process.env.NODE_ENV === 'production') {
-  app.use(express.static(config.clientDist));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(config.clientDist, 'index.html'));
-  });
-}
+// Serve React build (always in production mode)
+app.use(express.static(config.clientDist));
+app.get('*', (req, res) => {
+  res.sendFile(path.join(config.clientDist, 'index.html'));
+});
 
 // Catch unhandled errors to prevent process crash
 process.on('uncaughtException', (err) => {

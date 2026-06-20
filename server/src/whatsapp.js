@@ -117,7 +117,29 @@ export async function initWhatsApp() {
       connectionStatus = 'disconnected';
       const error = lastDisconnect?.error;
       const statusCode = error?.output?.statusCode;
-      console.log(`[WhatsApp] Connection closed — statusCode: ${statusCode}, error: ${error?.message}`);
+      const errorMessage = error?.message || '';
+      console.log(`[WhatsApp] Connection closed — statusCode: ${statusCode}, error: ${errorMessage}`);
+
+      // Detect Bad MAC error - corrupted encryption session
+      if (errorMessage.includes('Bad MAC') || errorMessage.includes('Session error')) {
+        console.log('[WhatsApp] Bad MAC error detected - corrupted encryption session');
+        console.log('[WhatsApp] Auto-cleaning auth_info and restarting...');
+        
+        // Clean auth_info directory
+        if (fs.existsSync(config.authDir)) {
+          try {
+            fs.rmSync(config.authDir, { recursive: true, force: true });
+            console.log('[WhatsApp] auth_info deleted successfully');
+          } catch (err) {
+            console.error('[WhatsApp] Failed to delete auth_info:', err.message);
+          }
+        }
+        
+        // Reset reconnect attempts and restart
+        reconnectAttempts = 0;
+        setTimeout(initWhatsApp, 2000);
+        return;
+      }
 
       const loggedOut = statusCode === DisconnectReason.loggedOut;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;

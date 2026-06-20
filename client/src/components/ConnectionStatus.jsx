@@ -63,11 +63,29 @@ export default function ConnectionStatus({ status, qr }) {
         <span style={styles.label}>{statusLabels[status] || status}</span>
       </div>
 
-      {status === 'connecting' && qr && (
+      {qr && (
         <div style={styles.qrContainer}>
           <div style={styles.qrCard}>
             <h3 style={{ margin: '0 0 16px' }}>Escanea el QR con WhatsApp</h3>
             <img src={qr} alt="QR Code" style={styles.qrImg} />
+            <button
+              style={{
+                marginTop: '16px',
+                padding: '8px 16px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px',
+              }}
+              onClick={() => {
+                // This will be handled by parent component
+                window.dispatchEvent(new CustomEvent('close-qr'));
+              }}
+            >
+              Cerrar
+            </button>
           </div>
         </div>
       )}

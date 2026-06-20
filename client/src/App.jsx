@@ -131,6 +131,10 @@ export default function App() {
     // Listen for WhatsApp status updates
     socket.on('whatsapp:status', ({ status: s }) => {
       setStatus(s);
+      // Clear QR when successfully connected
+      if (s === 'connected') {
+        setQr(null);
+      }
       if (s === 'connected' && groups.length === 0) {
         fetchGroups().then(setGroups);
       }
@@ -140,6 +144,12 @@ export default function App() {
     socket.on('whatsapp:qr', (qrDataUrl) => {
       setQr(qrDataUrl);
     });
+
+    // Listen for QR close event
+    const handleCloseQR = () => {
+      setQr(null);
+    };
+    window.addEventListener('close-qr', handleCloseQR);
 
     // Listen for messages updates
     socket.on('messages:updated', (messages) => {
@@ -163,6 +173,7 @@ export default function App() {
 
     return () => {
       socket.disconnect();
+      window.removeEventListener('close-qr', handleCloseQR);
     };
   }, [refreshMessages, refreshStatusUpdates, isAuthenticated]);
 

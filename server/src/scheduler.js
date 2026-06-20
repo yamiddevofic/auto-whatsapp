@@ -179,7 +179,9 @@ export function scheduleDirectMessage(row) {
         const contactName = contact?.name || contact?.notify || contact?.agenda_name || null;
         const variedContent = varyMessageContent(row.content, contactName);
         
+        console.log(`[Scheduler] Sending to ${jid} (${contactName || 'unknown'}): ${variedContent?.substring(0, 50)}...`);
         await sendMessage(jid, variedContent, row.image_path);
+        console.log(`[Scheduler] Successfully sent to ${jid}`);
         incrementMessageCount();
         sent++;
         // Random delay between messages (3-15 seconds) to avoid bot detection
@@ -189,6 +191,7 @@ export function scheduleDirectMessage(row) {
           await new Promise(resolve => setTimeout(resolve, delay));
         }
       } catch (err) {
+        console.error(`[Scheduler] Failed to send to ${jid}:`, err.message);
         errors.push(`${jid}: ${err.message}`);
       }
     }

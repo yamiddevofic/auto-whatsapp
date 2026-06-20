@@ -9,6 +9,8 @@ import { initContactsTable } from './contacts.js';
 import { initAgendaTable } from './agenda.js';
 import { initWhatsApp } from './whatsapp.js';
 import { loadPendingMessages } from './scheduler.js';
+import { authMiddleware } from './auth.js';
+import authRoutes from './routes/auth.js';
 import statusRoutes from './routes/status.js';
 import groupsRoutes from './routes/groups.js';
 import messagesRoutes from './routes/messages.js';
@@ -93,6 +95,12 @@ app.use('/api/agenda/import', (req, res, next) => {
     next();
   }
 });
+
+// Public routes (no authentication required)
+app.use('/api/auth', authRoutes());
+
+// Protect all other routes with authentication middleware
+app.use('/api', authMiddleware);
 
 // Routes
 app.use(statusRoutes);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import Login from './components/Login.jsx';
 import ConnectionStatus from './components/ConnectionStatus.jsx';
 import GroupList from './components/GroupList.jsx';
 import MessageForm from './components/MessageForm.jsx';
@@ -80,6 +81,7 @@ export default function App() {
   const [statusUpdates, setStatusUpdates] = useState([]);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [activeTab, setActiveTab] = useState('messages');
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const refreshMessages = useCallback(async () => {
     const msgs = await fetchMessages();
@@ -89,6 +91,14 @@ export default function App() {
   const refreshStatusUpdates = useCallback(async () => {
     const updates = await fetchStatusUpdates();
     setStatusUpdates(updates);
+  }, []);
+
+  // Check if user is already logged in
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      setIsAuthenticated(true);
+    }
   }, []);
 
 
@@ -116,11 +126,34 @@ export default function App() {
   }, [groups.length, refreshMessages, refreshStatusUpdates]);
 
   return (
-    <div style={styles.app}>
-      <div style={styles.header}>
-        <h1 style={styles.title}>Auto WhatsApp</h1>
-        <ConnectionStatus status={status} />
-      </div>
+    <>
+      {!isAuthenticated ? (
+        <Login onLoginSuccess={() => setIsAuthenticated(true)} />
+      ) : (
+        <div style={styles.app}>
+          <div style={styles.header}>
+            <h1 style={styles.title}>Auto WhatsApp</h1>
+            <ConnectionStatus status={status} />
+            <button
+              style={{
+                marginLeft: 'auto',
+                padding: '8px 16px',
+                backgroundColor: '#dc3545',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontSize: '14px',
+              }}
+              onClick={() => {
+                localStorage.removeItem('token');
+                localStorage.removeItem('username');
+                setIsAuthenticated(false);
+              }}
+            >
+              Cerrar sesión
+            </button>
+          </div>
 
       <div style={styles.tabs}>
         <button
@@ -232,6 +265,8 @@ export default function App() {
           </div>
         </>
       )}
-    </div>
+        </div>
+      )}
+    </>
   );
 }

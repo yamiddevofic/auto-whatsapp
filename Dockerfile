@@ -11,6 +11,9 @@ COPY server ./server
 # Copy client directory  
 COPY client ./client
 
+# Copy .env if exists
+COPY .env* ./
+
 # Install root dependencies
 RUN npm ci
 

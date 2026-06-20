@@ -6,7 +6,7 @@
     "dev:client": "cd client && npm run dev",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "build": "cd client && npm run build",
-    "start": "NODE_ENV=production node server/src/index.js",
+    "start": "node --input-type=module -e \"process.env.NODE_ENV='production'; import('./server/src/index.js')\"",
     "install:all": "cd server && npm install && cd ../client && npm install"
   },
   "devDependencies": {

@@ -1,10 +1,37 @@
 import schedule from 'node-schedule';
-import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById } from './db.js';
+import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById, incrementMessageCount, getDailyLimit, canSendMoreMessages } from './db.js';
+import { getAllContacts } from './contacts.js';
 import { sendMessage, sendStatusUpdate } from './whatsapp.js';
 
 const activeJobs = new Map();
 const activeStatusJobs = new Map();
 const activeDirectJobs = new Map();
+
+// Helper function to add content variations for anti-bot detection
+function varyMessageContent(content, contactName) {
+  if (!content) return content;
+  
+  let variedContent = content;
+  
+  // Add contact name if available and content doesn't already have it
+  if (contactName && !content.toLowerCase().includes(contactName.toLowerCase())) {
+    const greetings = ['Hola', 'Buenos días', 'Buenas tardes', 'Hola'];
+    const greeting = greetings[Math.floor(Math.random() * greetings.length)];
+    variedContent = `${greeting} ${contactName}, ${content.charAt(0).toLowerCase() + content.slice(1)}`;
+  }
+  
+  // Add small random variations
+  const variations = [
+    // Add emoji occasionally (30% chance)
+    () => Math.random() < 0.3 ? variedContent + ' 👋' : variedContent,
+    // Add variation in punctuation occasionally (20% chance)
+    () => Math.random() < 0.2 ? variedContent.replace(/[.!?]$/, '...') : variedContent,
+    // No change
+    () => variedContent
+  ];
+  
+  return variations[Math.floor(Math.random() * variations.length)]();
+}
 
 export function scheduleMessage(row) {
   const date = new Date(row.scheduled_at);
@@ -133,10 +160,34 @@ export function scheduleDirectMessage(row) {
   const sendToAll = async () => {
     let sent = 0;
     let errors = [];
+    const dailyLimit = getDailyLimit();
+    const currentStats = getTodayMessageStats();
+    const contacts = getAllContacts();
+    const contactMap = new Map(contacts.map(c => [c.jid, c]));
+    console.log(`[Scheduler] Daily message limit: ${dailyLimit}, Already sent: ${currentStats.messages_sent}`);
+
     for (const jid of recipients) {
+      // Check daily limit before each message
+      if (!canSendMoreMessages(1)) {
+        console.log(`[Scheduler] Daily limit reached (${dailyLimit}). Stopping message sending.`);
+        break;
+      }
+
       try {
-        await sendMessage(jid, row.content, row.image_path);
+        // Get contact name for content variation
+        const contact = contactMap.get(jid);
+        const contactName = contact?.name || contact?.notify || contact?.agenda_name || null;
+        const variedContent = varyMessageContent(row.content, contactName);
+        
+        await sendMessage(jid, variedContent, row.image_path);
+        incrementMessageCount();
         sent++;
+        // Random delay between messages (3-15 seconds) to avoid bot detection
+        if (sent < recipients.length) {
+          const delay = Math.floor(Math.random() * 12000) + 3000; // 3000-15000ms
+          console.log(`[Scheduler] Waiting ${delay / 1000}s before next message`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
       } catch (err) {
         errors.push(`${jid}: ${err.message}`);
       }

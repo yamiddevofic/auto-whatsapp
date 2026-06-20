@@ -150,6 +150,16 @@ export async function initDatabase() {
     )
   `);
 
+  _raw.exec(`
+    CREATE TABLE IF NOT EXISTS message_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE,
+      messages_sent INTEGER DEFAULT 0,
+      status_updates_sent INTEGER DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+
   save();
   return db;
 }
@@ -298,6 +308,53 @@ export function updateDirectMessage(id, { content, scheduledAt }) {
 
 export function deleteDirectMessage(id) {
   db.prepare('DELETE FROM direct_messages WHERE id = ?').run(id);
+}
+
+// --- Message stats for anti-bot detection ---
+
+export function getTodayMessageStats() {
+  const today = new Date().toISOString().split('T')[0];
+  const stats = db.prepare('SELECT * FROM message_stats WHERE date = ?').get(today);
+  if (!stats) {
+    return { date: today, messages_sent: 0, status_updates_sent: 0 };
+  }
+  return stats;
+}
+
+export function incrementMessageCount() {
+  const today = new Date().toISOString().split('T')[0];
+  db.prepare(`
+    INSERT INTO message_stats (date, messages_sent, status_updates_sent)
+    VALUES (?, 1, 0)
+    ON CONFLICT(date) DO UPDATE SET
+      messages_sent = messages_sent + 1
+  `).run(today);
+}
+
+export function incrementStatusUpdateCount() {
+  const today = new Date().toISOString().split('T')[0];
+  db.prepare(`
+    INSERT INTO message_stats (date, messages_sent, status_updates_sent)
+    VALUES (?, 0, 1)
+    ON CONFLICT(date) DO UPDATE SET
+      status_updates_sent = status_updates_sent + 1
+  `).run(today);
+}
+
+export function getDailyLimit() {
+  const stats = getTodayMessageStats();
+  const daysActive = db.prepare('SELECT COUNT(*) as count FROM message_stats').get().count;
+  
+  // Gradual increase: 200 for day 1, +50 per day up to 500 max
+  if (daysActive === 0) return 200;
+  const limit = Math.min(200 + (daysActive * 50), 500);
+  return limit;
+}
+
+export function canSendMoreMessages(count = 1) {
+  const stats = getTodayMessageStats();
+  const limit = getDailyLimit();
+  return (stats.messages_sent + count) <= limit;
 }
 
 export default db;

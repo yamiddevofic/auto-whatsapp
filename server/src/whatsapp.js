@@ -8,7 +8,7 @@ import pino from 'pino';
 import fs from 'fs';
 import QRCode from 'qrcode';
 import config from './config.js';
-import { saveContacts, savePushName, updateContactGroups, getAllContactJids as getStoredContactJids, getContactCount } from './contacts.js';
+import { saveContacts, savePushName, updateContactGroups, getAllContactJids, getContactCount } from './contacts.js';
 import { getAgendaWhatsAppJids } from './agenda.js';
 
 const logger = pino({ level: 'silent' });
@@ -118,6 +118,8 @@ export async function initWhatsApp() {
       const error = lastDisconnect?.error;
       const statusCode = error?.output?.statusCode;
       console.log(`[WhatsApp] Connection closed — statusCode: ${statusCode}, error: ${error?.message}`);
+
+      const loggedOut = statusCode === DisconnectReason.loggedOut;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
       if (shouldReconnect && reconnectAttempts < MAX_RECONNECT) {
@@ -125,8 +127,12 @@ export async function initWhatsApp() {
         const delay = Math.min(1000 * 2 ** reconnectAttempts, 30000);
         console.log(`[WhatsApp] Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts})`);
         setTimeout(initWhatsApp, delay);
-      } else {
-        console.log('[WhatsApp] Disconnected permanently. Delete auth_info/ and restart to re-link.');
+      } else if (loggedOut) {
+        console.log('[WhatsApp] Logged out from WhatsApp. The session is invalid.');
+        console.log('[WhatsApp] Delete auth_info/ to re-link.');
+      } else if (reconnectAttempts >= MAX_RECONNECT) {
+        console.log(`[WhatsApp] Max reconnect attempts reached (${reconnectAttempts}).`);
+        console.log('[WhatsApp] Delete auth_info/ and restart the server to re-link.');
       }
     }
   });
@@ -277,16 +283,14 @@ export async function sendStatusUpdate(content, imagePath) {
 
   const statusJid = 'status@broadcast';
 
-  // Use only real contacts from agenda (phone contacts verified on WhatsApp)
-  const allJids = getAgendaWhatsAppJids().filter((jid) => jid && jid.endsWith('@s.whatsapp.net'));
-
-  if (allJids.length === 0) {
-    throw new Error('No hay contactos de agenda verificados en WhatsApp. Ve a Contactos de agenda, importa tu .vcf y verifica.');
+  // Obtener lista de contactos para la audiencia del estado
+  const statusJidList = getAllContactJids();
+  if (statusJidList.length === 0) {
+    throw new Error('No hay contactos guardados para mostrar el estado');
   }
 
-  console.log(`[WhatsApp] Status will be visible to ${allJids.length} agenda contacts`);
+  console.log(`[WhatsApp] Status will be visible to ${statusJidList.length} contacts`);
 
-  // Build the message content
   let msgContent;
   if (imagePath && fs.existsSync(imagePath)) {
     console.log(`[WhatsApp] Status with image: ${imagePath}`);
@@ -296,16 +300,19 @@ export async function sendStatusUpdate(content, imagePath) {
     };
   } else if (content) {
     console.log(`[WhatsApp] Status with text: "${content.substring(0, 50)}"`);
-    msgContent = {
-      text: content,
-      font: 0,
-      backgroundColor: '#075E54',
-    };
+    msgContent = { text: content };
   } else {
     throw new Error('Status must have text or image');
   }
 
-  console.log(`[WhatsApp] Posting status to ${allJids.length} contacts`);
-  await sock.sendMessage(statusJid, msgContent, { statusJidList: allJids });
-  console.log(`[WhatsApp] Status posted successfully`);
+  try {
+    console.log(`[WhatsApp] Posting status to ${statusJidList.length} contacts`);
+    await sock.sendMessage(statusJid, msgContent, {
+      statusJidList,
+    });
+    console.log(`[WhatsApp] Status posted successfully`);
+  } catch (err) {
+    console.error(`[WhatsApp] Failed to send status:`, err.message);
+    throw err;
+  }
 }

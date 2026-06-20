@@ -283,13 +283,17 @@ export async function sendStatusUpdate(content, imagePath) {
 
   const statusJid = 'status@broadcast';
 
-  // Obtener lista de contactos para la audiencia del estado
-  const statusJidList = getAllContactJids();
+  // Obtener lista de contactos para la audiencia del estado (agenda + grupos)
+  const agendaJids = getAgendaWhatsAppJids();
+  const groupJids = getAllContactJids();
+  // Combinar y eliminar duplicados usando Set
+  const statusJidList = [...new Set([...agendaJids, ...groupJids])];
+  
   if (statusJidList.length === 0) {
     throw new Error('No hay contactos guardados para mostrar el estado');
   }
 
-  console.log(`[WhatsApp] Status will be visible to ${statusJidList.length} contacts`);
+  console.log(`[WhatsApp] Status will be visible to ${statusJidList.length} contacts (${agendaJids.length} from agenda, ${groupJids.length} from groups)`);
 
   let msgContent;
   if (imagePath && fs.existsSync(imagePath)) {

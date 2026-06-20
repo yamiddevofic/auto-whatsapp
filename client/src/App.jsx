@@ -126,7 +126,7 @@ export default function App() {
     fetchPublishedStatuses().then(setPublishedStatuses);
 
     // WebSocket connection
-    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3001');
+    const socket = io(import.meta.env.VITE_API_URL || window.location.origin);
 
     // Listen for WhatsApp status updates
     socket.on('whatsapp:status', ({ status: s }) => {

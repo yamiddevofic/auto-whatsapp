@@ -158,44 +158,52 @@ export function scheduleDirectMessage(row) {
   const recipients = JSON.parse(row.recipients);
 
   const sendToAll = async () => {
+    console.log(`[Scheduler] sendToAll() called with ${recipients.length} recipients`);
     let sent = 0;
     let errors = [];
-    const dailyLimit = getDailyLimit();
-    const currentStats = getTodayMessageStats();
-    const contacts = getAllContacts();
-    const contactMap = new Map(contacts.map(c => [c.jid, c]));
-    console.log(`[Scheduler] Daily message limit: ${dailyLimit}, Already sent: ${currentStats.messages_sent}`);
+    try {
+      const dailyLimit = getDailyLimit();
+      const currentStats = getTodayMessageStats();
+      console.log(`[Scheduler] Daily limit check: ${dailyLimit}, sent: ${currentStats.messages_sent}`);
+      const contacts = getAllContacts();
+      console.log(`[Scheduler] Loaded ${contacts.length} contacts`);
+      const contactMap = new Map(contacts.map(c => [c.jid, c]));
+      console.log(`[Scheduler] Daily message limit: ${dailyLimit}, Already sent: ${currentStats.messages_sent}`);
 
-    for (const jid of recipients) {
-      // Check daily limit before each message
-      if (!canSendMoreMessages(1)) {
-        console.log(`[Scheduler] Daily limit reached (${dailyLimit}). Stopping message sending.`);
-        break;
-      }
-
-      try {
-        // Get contact name for content variation
-        const contact = contactMap.get(jid);
-        const contactName = contact?.name || contact?.notify || contact?.agenda_name || null;
-        const variedContent = varyMessageContent(row.content, contactName);
-        
-        console.log(`[Scheduler] Sending to ${jid} (${contactName || 'unknown'}): ${variedContent?.substring(0, 50)}...`);
-        await sendMessage(jid, variedContent, row.image_path);
-        console.log(`[Scheduler] Successfully sent to ${jid}`);
-        incrementMessageCount();
-        sent++;
-        // Random delay between messages (3-15 seconds) to avoid bot detection
-        if (sent < recipients.length) {
-          const delay = Math.floor(Math.random() * 12000) + 3000; // 3000-15000ms
-          console.log(`[Scheduler] Waiting ${delay / 1000}s before next message`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+      for (const jid of recipients) {
+        // Check daily limit before each message
+        if (!canSendMoreMessages(1)) {
+          console.log(`[Scheduler] Daily limit reached (${dailyLimit}). Stopping message sending.`);
+          break;
         }
-      } catch (err) {
-        console.error(`[Scheduler] Failed to send to ${jid}:`, err.message);
-        errors.push(`${jid}: ${err.message}`);
+
+        try {
+          // Get contact name for content variation
+          const contact = contactMap.get(jid);
+          const contactName = contact?.name || contact?.notify || contact?.agenda_name || null;
+          const variedContent = varyMessageContent(row.content, contactName);
+          
+          console.log(`[Scheduler] Sending to ${jid} (${contactName || 'unknown'}): ${variedContent?.substring(0, 50)}...`);
+          await sendMessage(jid, variedContent, row.image_path);
+          console.log(`[Scheduler] Successfully sent to ${jid}`);
+          incrementMessageCount();
+          sent++;
+          // Random delay between messages (3-15 seconds) to avoid bot detection
+          if (sent < recipients.length) {
+            const delay = Math.floor(Math.random() * 12000) + 3000; // 3000-15000ms
+            console.log(`[Scheduler] Waiting ${delay / 1000}s before next message`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        } catch (err) {
+          console.error(`[Scheduler] Failed to send to ${jid}:`, err.message);
+          errors.push(`${jid}: ${err.message}`);
+        }
       }
+      return { sent, errors };
+    } catch (err) {
+      console.error(`[Scheduler] Error in sendToAll():`, err.message);
+      return { sent, errors: [err.message] };
     }
-    return { sent, errors };
   };
 
   if (date <= new Date()) {

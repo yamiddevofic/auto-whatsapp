@@ -164,7 +164,7 @@ export default function App() {
     return () => {
       socket.disconnect();
     };
-  }, [groups.length, refreshMessages, refreshStatusUpdates, isAuthenticated]);
+  }, [refreshMessages, refreshStatusUpdates, isAuthenticated]);
 
   return (
     <>

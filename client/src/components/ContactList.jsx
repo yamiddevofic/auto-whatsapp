@@ -114,7 +114,8 @@ export default function ContactList() {
       if (result.error) alert(result.error);
       else {
         setData({ items: [], total: 0, page: 1, totalPages: 0 });
-        alert('Desvinculado. Ve al inicio y escanea el nuevo codigo QR.');
+        // Reload page to reset socket connection and QR state
+        window.location.reload();
       }
     } catch { alert('Error al desvincular'); }
     finally { setUnlinking(false); }

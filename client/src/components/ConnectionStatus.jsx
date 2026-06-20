@@ -1,6 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
-import { fetchQR } from '../api.js';
+import React from 'react';
 
 const statusColors = {
   connected: '#25D366',
@@ -54,29 +52,7 @@ const styles = {
   },
 };
 
-export default function ConnectionStatus({ status }) {
-  const [qr, setQr] = useState(null);
-
-  useEffect(() => {
-    if (status !== 'connecting') {
-      setQr(null);
-      return;
-    }
-
-    // Initial fetch
-    fetchQR().then(({ qr: qrData }) => setQr(qrData));
-
-    // WebSocket connection for QR updates
-    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3001');
-
-    socket.on('whatsapp:qr', (qrDataUrl) => {
-      setQr(qrDataUrl);
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [status]);
+export default function ConnectionStatus({ status, qr }) {
 
   const color = statusColors[status] || statusColors.disconnected;
 
@@ -92,9 +68,6 @@ export default function ConnectionStatus({ status }) {
           <div style={styles.qrCard}>
             <h3 style={{ margin: '0 0 16px' }}>Escanea el QR con WhatsApp</h3>
             <img src={qr} alt="QR Code" style={styles.qrImg} />
-            <p style={{ color: '#666', marginTop: 12 }}>
-              Abre WhatsApp &gt; Dispositivos vinculados &gt; Vincular dispositivo
-            </p>
           </div>
         </div>
       )}

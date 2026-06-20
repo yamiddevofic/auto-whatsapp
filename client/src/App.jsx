@@ -83,6 +83,7 @@ export default function App() {
   const [statusUpdates, setStatusUpdates] = useState([]);
   const [directMessages, setDirectMessages] = useState([]);
   const [publishedStatuses, setPublishedStatuses] = useState([]);
+  const [qr, setQr] = useState(null);
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [activeTab, setActiveTab] = useState('messages');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -137,7 +138,7 @@ export default function App() {
 
     // Listen for QR code updates
     socket.on('whatsapp:qr', (qrDataUrl) => {
-      // QR code is handled by ConnectionStatus component
+      setQr(qrDataUrl);
     });
 
     // Listen for messages updates
@@ -173,7 +174,7 @@ export default function App() {
         <div style={styles.app}>
           <div style={styles.header}>
             <h1 style={styles.title}>Auto WhatsApp</h1>
-            <ConnectionStatus status={status} />
+            <ConnectionStatus status={status} qr={qr} />
             <button
               style={{
                 marginLeft: 'auto',

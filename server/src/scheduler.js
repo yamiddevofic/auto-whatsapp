@@ -1,5 +1,5 @@
 import schedule from 'node-schedule';
-import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById, incrementMessageCount, getDailyLimit, canSendMoreMessages } from './db.js';
+import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById, incrementMessageCount, getDailyLimit, canSendMoreMessages, getTodayMessageStats } from './db.js';
 import { getAllContacts } from './contacts.js';
 import { sendMessage, sendStatusUpdate } from './whatsapp.js';
 

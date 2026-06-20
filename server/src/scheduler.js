@@ -1,7 +1,8 @@
 import schedule from 'node-schedule';
-import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById, incrementMessageCount, getDailyLimit, canSendMoreMessages, getTodayMessageStats } from './db.js';
+import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById, incrementMessageCount, getDailyLimit, canSendMoreMessages, getTodayMessageStats, getAllMessages, getAllStatusUpdates, getAllDirectMessages } from './db.js';
 import { getAllContacts } from './contacts.js';
 import { sendMessage, sendStatusUpdate } from './whatsapp.js';
+import { io } from './index.js';
 
 const activeJobs = new Map();
 const activeStatusJobs = new Map();
@@ -46,16 +47,19 @@ export function scheduleMessage(row) {
           if (!msg || msg.status !== 'pending') return;
           await sendMessage(msg.group_id, msg.content, msg.image_path);
           updateMessageStatus(row.id, 'sent');
+          io.emit('messages:updated', getAllMessages());
           console.log(`[Scheduler] Late message ${row.id} sent successfully`);
         } catch (err) {
           console.error(`[Scheduler] Late message ${row.id} failed:`, err.message);
           updateMessageStatus(row.id, 'failed', err.message);
+          io.emit('messages:updated', getAllMessages());
         }
       })();
       return;
     }
     console.log(`[Scheduler] Message ${row.id} is ${minutesLate}m in the past, marking as failed`);
     updateMessageStatus(row.id, 'failed', 'Scheduled time already passed');
+    io.emit('messages:updated', getAllMessages());
     return;
   }
 
@@ -70,10 +74,12 @@ export function scheduleMessage(row) {
       console.log(`[Scheduler] Sending message ${row.id} to ${msg.group_name}`);
       await sendMessage(msg.group_id, msg.content, msg.image_path);
       updateMessageStatus(row.id, 'sent');
+      io.emit('messages:updated', getAllMessages());
       console.log(`[Scheduler] Message ${row.id} sent successfully`);
     } catch (err) {
       console.error(`[Scheduler] Message ${row.id} failed:`, err.message);
       updateMessageStatus(row.id, 'failed', err.message);
+      io.emit('messages:updated', getAllMessages());
     } finally {
       activeJobs.delete(row.id);
     }
@@ -105,16 +111,19 @@ export function scheduleStatusUpdateJob(row) {
           if (!su || su.status !== 'pending') return;
           await sendStatusUpdate(su.content, su.image_path);
           updateStatusUpdateStatus(row.id, 'sent');
+          io.emit('status-updates:updated', getAllStatusUpdates());
           console.log(`[Scheduler] Late status ${row.id} sent successfully`);
         } catch (err) {
           console.error(`[Scheduler] Late status ${row.id} failed:`, err.message);
           updateStatusUpdateStatus(row.id, 'failed', err.message);
+          io.emit('status-updates:updated', getAllStatusUpdates());
         }
       })();
       return;
     }
     console.log(`[Scheduler] Status ${row.id} is ${minutesLate}m in the past, marking as failed`);
     updateStatusUpdateStatus(row.id, 'failed', 'Scheduled time already passed');
+    io.emit('status-updates:updated', getAllStatusUpdates());
     return;
   }
 
@@ -129,10 +138,12 @@ export function scheduleStatusUpdateJob(row) {
       console.log(`[Scheduler] Posting status update ${row.id}`);
       await sendStatusUpdate(su.content, su.image_path);
       updateStatusUpdateStatus(row.id, 'sent');
+      io.emit('status-updates:updated', getAllStatusUpdates());
       console.log(`[Scheduler] Status ${row.id} posted successfully`);
     } catch (err) {
       console.error(`[Scheduler] Status ${row.id} failed:`, err.message);
       updateStatusUpdateStatus(row.id, 'failed', err.message);
+      io.emit('status-updates:updated', getAllStatusUpdates());
     } finally {
       activeStatusJobs.delete(row.id);
     }
@@ -220,14 +231,17 @@ export function scheduleDirectMessage(row) {
           } else {
             updateDirectMessageStatus(row.id, 'sent');
           }
+          io.emit('direct-messages:updated', getAllDirectMessages());
           console.log(`[Scheduler] Direct message ${row.id}: ${sent}/${recipients.length} sent`);
         } catch (err) {
           updateDirectMessageStatus(row.id, 'failed', err.message);
+          io.emit('direct-messages:updated', getAllDirectMessages());
         }
       })();
       return;
     }
     updateDirectMessageStatus(row.id, 'failed', 'Scheduled time already passed');
+    io.emit('direct-messages:updated', getAllDirectMessages());
     return;
   }
 
@@ -246,9 +260,11 @@ export function scheduleDirectMessage(row) {
       } else {
         updateDirectMessageStatus(row.id, 'sent');
       }
+      io.emit('direct-messages:updated', getAllDirectMessages());
       console.log(`[Scheduler] Direct message ${row.id}: ${sent}/${recipients.length} sent`);
     } catch (err) {
       updateDirectMessageStatus(row.id, 'failed', err.message);
+      io.emit('direct-messages:updated', getAllDirectMessages());
     } finally {
       activeDirectJobs.delete(row.id);
     }

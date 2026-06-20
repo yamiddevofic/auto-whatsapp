@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { createDirectMessage, getAllDirectMessages, cancelDirectMessage, getDirectMessageById, updateDirectMessage, deleteDirectMessage } from '../db.js';
 import { scheduleDirectMessage, cancelScheduledDirectMessage } from '../scheduler.js';
 import { sendMessage, checkOnWhatsApp } from '../whatsapp.js';
+import { io } from '../index.js';
 
 const router = Router();
 
@@ -111,6 +112,7 @@ router.post('/api/direct-messages', async (req, res) => {
     });
 
     scheduleDirectMessage(msg);
+    io.emit('direct-messages:updated', getAllDirectMessages());
     res.status(201).json(msg);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -126,6 +128,7 @@ router.delete('/api/direct-messages/:id', (req, res) => {
 
   cancelScheduledDirectMessage(id);
   cancelDirectMessage(id);
+  io.emit('direct-messages:updated', getAllDirectMessages());
   res.json({ success: true });
 });
 
@@ -142,7 +145,7 @@ router.put('/api/direct-messages/:id', (req, res) => {
 
     cancelScheduledDirectMessage(id);
     scheduleDirectMessage(updated);
-
+    io.emit('direct-messages:updated', getAllDirectMessages());
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -160,6 +163,7 @@ router.delete('/api/direct-messages/:id/permanent', (req, res) => {
   }
 
   deleteDirectMessage(id);
+  io.emit('direct-messages:updated', getAllDirectMessages());
   res.json({ success: true });
 });
 

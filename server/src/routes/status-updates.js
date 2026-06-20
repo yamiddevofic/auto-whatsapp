@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { createStatusUpdate, getAllStatusUpdates, cancelStatusUpdate, getStatusUpdateById, updateStatusUpdate, deleteStatusUpdate } from '../db.js';
 import { scheduleStatusUpdateJob, cancelScheduledStatusUpdate } from '../scheduler.js';
 import { sendStatusUpdate } from '../whatsapp.js';
+import { io } from '../index.js';
 
 const router = Router();
 
@@ -81,6 +82,7 @@ router.post('/api/status-updates', (req, res) => {
       }
     }
 
+    io.emit('status-updates:updated', getAllStatusUpdates());
     res.status(201).json({ success: true, count: created.length, items: created });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -101,6 +103,7 @@ router.delete('/api/status-updates/:id', (req, res) => {
 
   cancelScheduledStatusUpdate(id);
   cancelStatusUpdate(id);
+  io.emit('status-updates:updated', getAllStatusUpdates());
   res.json({ success: true });
 });
 
@@ -122,7 +125,7 @@ router.put('/api/status-updates/:id', (req, res) => {
 
     cancelScheduledStatusUpdate(id);
     scheduleStatusUpdateJob(updated);
-
+    io.emit('status-updates:updated', getAllStatusUpdates());
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -142,6 +145,7 @@ router.delete('/api/status-updates/:id/permanent', (req, res) => {
   }
 
   deleteStatusUpdate(id);
+  io.emit('status-updates:updated', getAllStatusUpdates());
   res.json({ success: true });
 });
 

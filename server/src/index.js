@@ -3,6 +3,8 @@ import cors from 'cors';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 import config from './config.js';
 import { initDatabase } from './db.js';
 import { initContactsTable } from './contacts.js';
@@ -23,6 +25,13 @@ import directMessagesRoutes from './routes/direct-messages.js';
 fs.mkdirSync(config.uploadsDir, { recursive: true });
 
 const app = express();
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
@@ -132,6 +141,9 @@ process.on('unhandledRejection', (reason) => {
   console.error('[Server] Unhandled rejection:', reason);
 });
 
+// Export io for use in other modules
+export { io };
+
 // Start
 async function start() {
   await initDatabase();
@@ -139,7 +151,7 @@ async function start() {
   initAgendaTable();
   await initWhatsApp();
   loadPendingMessages();
-  app.listen(config.port, '0.0.0.0', () => {
+  httpServer.listen(config.port, '0.0.0.0', () => {
     console.log(`[Server] Running on http://0.0.0.0:${config.port}`);
   });
 }

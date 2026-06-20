@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { createMessage, getAllMessages, cancelMessage, getMessageById, updateMessage, deleteMessage } from '../db.js';
 import { scheduleMessage, cancelScheduledMessage } from '../scheduler.js';
+import { io } from '../index.js';
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.post('/api/messages', (req, res) => {
     });
 
     scheduleMessage(msg);
+    io.emit('messages:updated', getAllMessages());
     res.status(201).json(msg);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -48,6 +50,7 @@ router.delete('/api/messages/:id', (req, res) => {
 
   cancelScheduledMessage(id);
   cancelMessage(id);
+  io.emit('messages:updated', getAllMessages());
   res.json({ success: true });
 });
 
@@ -71,6 +74,7 @@ router.put('/api/messages/:id', (req, res) => {
     cancelScheduledMessage(id);
     scheduleMessage(updated);
 
+    io.emit('messages:updated', getAllMessages());
     res.json(updated);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -90,6 +94,7 @@ router.delete('/api/messages/:id/permanent', (req, res) => {
   }
 
   deleteMessage(id);
+  io.emit('messages:updated', getAllMessages());
   res.json({ success: true });
 });
 

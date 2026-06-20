@@ -10,6 +10,7 @@ import QRCode from 'qrcode';
 import config from './config.js';
 import { saveContacts, savePushName, updateContactGroups, getAllContactJids, getContactCount } from './contacts.js';
 import { getAgendaWhatsAppJids } from './agenda.js';
+import { io } from './index.js';
 
 const logger = pino({ level: 'silent' });
 
@@ -42,6 +43,41 @@ export async function initWhatsApp() {
   });
 
   sock.ev.on('creds.update', saveCreds);
+
+  // Listen for session errors (Bad MAC, etc.) during message decryption
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    // Process messages normally, but catch session errors
+    for (const msg of messages) {
+      if (msg.pushName && msg.key?.remoteJid) {
+        const senderJid = msg.key.participant || msg.key.remoteJid;
+        if (senderJid && senderJid.endsWith('@s.whatsapp.net')) {
+          savePushName(senderJid, msg.pushName);
+        }
+      }
+    }
+  });
+
+  // Listen for any session-related errors
+  sock.ev.on('error', (err) => {
+    const errorMessage = err?.message || '';
+    if (errorMessage.includes('Bad MAC') || errorMessage.includes('Session error')) {
+      console.log('[WhatsApp] Session error detected - corrupted encryption session');
+      console.log('[WhatsApp] Auto-cleaning auth_info and restarting...');
+      
+      // Clean auth_info directory
+      if (fs.existsSync(config.authDir)) {
+        try {
+          fs.rmSync(config.authDir, { recursive: true, force: true });
+          console.log('[WhatsApp] auth_info deleted successfully');
+        } catch (err) {
+          console.error('[WhatsApp] Failed to delete auth_info:', err.message);
+        }
+      }
+      
+      // Restart connection
+      setTimeout(initWhatsApp, 2000);
+    }
+  });
 
   // Full contacts from history sync (fires on first QR link)
   sock.ev.on('messaging-history.set', ({ contacts }) => {
@@ -97,6 +133,8 @@ export async function initWhatsApp() {
       connectionStatus = 'connecting';
       qrDataUrl = await QRCode.toDataURL(qr);
       console.log('[WhatsApp] QR code generated — scan from your phone');
+      io.emit('whatsapp:qr', qrDataUrl);
+      io.emit('whatsapp:status', { status: connectionStatus });
     }
 
     if (connection === 'open') {
@@ -104,6 +142,7 @@ export async function initWhatsApp() {
       qrDataUrl = null;
       reconnectAttempts = 0;
       console.log('[WhatsApp] Connected');
+      io.emit('whatsapp:status', { status: connectionStatus });
 
       // Auto-sync contacts from groups if DB is empty
       if (getContactCount() === 0) {
@@ -119,6 +158,7 @@ export async function initWhatsApp() {
       const statusCode = error?.output?.statusCode;
       const errorMessage = error?.message || '';
       console.log(`[WhatsApp] Connection closed — statusCode: ${statusCode}, error: ${errorMessage}`);
+      io.emit('whatsapp:status', { status: connectionStatus });
 
       // Detect Bad MAC error - corrupted encryption session
       if (errorMessage.includes('Bad MAC') || errorMessage.includes('Session error')) {

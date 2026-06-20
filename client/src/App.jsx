@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { io } from 'socket.io-client';
 import Login from './components/Login.jsx';
 import ConnectionStatus from './components/ConnectionStatus.jsx';
 import GroupList from './components/GroupList.jsx';
@@ -10,7 +11,7 @@ import ContactList from './components/ContactList.jsx';
 import AgendaList from './components/AgendaList.jsx';
 import DirectMessageList from './components/DirectMessageList.jsx';
 import QuickMessageForm from './components/QuickMessageForm.jsx';
-import { fetchStatus, fetchGroups, fetchMessages, fetchStatusUpdates } from './api.js';
+import { fetchStatus, fetchGroups, fetchMessages, fetchStatusUpdates, fetchDirectMessages } from './api.js';
 
 const styles = {
   app: {
@@ -114,24 +115,44 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated) return;
 
-    const poll = setInterval(async () => {
-      const { status: s } = await fetchStatus();
-      setStatus(s);
-      if (s === 'connected' && groups.length === 0) {
-        const g = await fetchGroups();
-        setGroups(g);
-      }
-    }, 3000);
-
+    // Initial fetch
     refreshMessages();
     refreshStatusUpdates();
-    const msgPoll = setInterval(refreshMessages, 10000);
-    const statusPoll = setInterval(refreshStatusUpdates, 10000);
+    fetchDirectMessages().then(setDirectMessages);
+
+    // WebSocket connection
+    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3001');
+
+    // Listen for WhatsApp status updates
+    socket.on('whatsapp:status', ({ status: s }) => {
+      setStatus(s);
+      if (s === 'connected' && groups.length === 0) {
+        fetchGroups().then(setGroups);
+      }
+    });
+
+    // Listen for QR code updates
+    socket.on('whatsapp:qr', (qrDataUrl) => {
+      // QR code is handled by ConnectionStatus component
+    });
+
+    // Listen for messages updates
+    socket.on('messages:updated', (messages) => {
+      setMessages(messages);
+    });
+
+    // Listen for status updates
+    socket.on('status-updates:updated', (updates) => {
+      setStatusUpdates(updates);
+    });
+
+    // Listen for direct messages updates
+    socket.on('direct-messages:updated', (directMsgs) => {
+      setDirectMessages(directMsgs);
+    });
 
     return () => {
-      clearInterval(poll);
-      clearInterval(msgPoll);
-      clearInterval(statusPoll);
+      socket.disconnect();
     };
   }, [groups.length, refreshMessages, refreshStatusUpdates, isAuthenticated]);
 

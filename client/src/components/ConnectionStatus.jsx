@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { io } from 'socket.io-client';
 import { fetchQR } from '../api.js';
 
 const statusColors = {
@@ -62,14 +63,19 @@ export default function ConnectionStatus({ status }) {
       return;
     }
 
-    const poll = setInterval(async () => {
-      const { qr: qrData } = await fetchQR();
-      setQr(qrData);
-    }, 2000);
-
+    // Initial fetch
     fetchQR().then(({ qr: qrData }) => setQr(qrData));
 
-    return () => clearInterval(poll);
+    // WebSocket connection for QR updates
+    const socket = io(import.meta.env.VITE_API_URL || 'http://localhost:3001');
+
+    socket.on('whatsapp:qr', (qrDataUrl) => {
+      setQr(qrDataUrl);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
   }, [status]);
 
   const color = statusColors[status] || statusColors.disconnected;

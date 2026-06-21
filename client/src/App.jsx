@@ -125,6 +125,13 @@ export default function App() {
     fetchDirectMessages().then(setDirectMessages);
     fetchPublishedStatuses().then(setPublishedStatuses);
 
+    // Fetch initial status from server
+    fetchStatus().then((statusData) => {
+      if (statusData && statusData.status) {
+        setStatus(statusData.status);
+      }
+    });
+
     // WebSocket connection
     const socket = io(import.meta.env.VITE_API_URL || window.location.origin);
 

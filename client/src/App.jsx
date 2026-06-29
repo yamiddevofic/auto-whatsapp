@@ -51,6 +51,15 @@ const styles = {
     display: 'flex',
     gap: 0,
     marginBottom: 20,
+    overflowX: 'auto',
+    WebkitOverflowScrolling: 'touch',
+  },
+  tabsContainer: {
+    '@media (max-width: 768px)': {
+      '&::-webkit-scrollbar': {
+        display: 'none',
+      },
+    },
   },
   tab: {
     flex: 1,
@@ -62,6 +71,8 @@ const styles = {
     color: '#777',
     cursor: 'pointer',
     transition: 'all 0.2s',
+    whiteSpace: 'nowrap',
+    minWidth: 'max-content',
   },
   tabActive: {
     flex: 1,
@@ -73,6 +84,8 @@ const styles = {
     background: '#fff',
     color: '#075E54',
     cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    minWidth: 'max-content',
   },
 };
 
@@ -87,6 +100,16 @@ export default function App() {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [activeTab, setActiveTab] = useState('messages');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth <= 768);
+    };
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const refreshMessages = useCallback(async () => {
     const msgs = await fetchMessages();
@@ -189,20 +212,31 @@ export default function App() {
       {!isAuthenticated ? (
         <Login onLoginSuccess={() => setIsAuthenticated(true)} />
       ) : (
-        <div style={styles.app}>
-          <div style={styles.header}>
-            <h1 style={styles.title}>Auto WhatsApp</h1>
+        <div style={{
+          ...styles.app,
+          padding: isMobile ? '10px' : '20px',
+        }}>
+          <div style={{
+            ...styles.header,
+            flexWrap: isMobile ? 'wrap' : 'nowrap',
+            gap: isMobile ? '8px' : '12px',
+            paddingBottom: isMobile ? '8px' : '12',
+          }}>
+            <h1 style={{
+              ...styles.title,
+              fontSize: isMobile ? '18px' : '24px',
+            }}>Auto WhatsApp</h1>
             <ConnectionStatus status={status} qr={qr} />
             <button
               style={{
                 marginLeft: 'auto',
-                padding: '8px 16px',
+                padding: isMobile ? '6px 12px' : '8px 16px',
                 backgroundColor: '#dc3545',
                 color: 'white',
                 border: 'none',
                 borderRadius: '4px',
                 cursor: 'pointer',
-                fontSize: '14px',
+                fontSize: isMobile ? '12px' : '14px',
               }}
               onClick={() => {
                 localStorage.removeItem('token');
@@ -214,7 +248,10 @@ export default function App() {
             </button>
           </div>
 
-      <div style={styles.tabs}>
+      <div style={{
+        ...styles.tabs,
+        padding: isMobile ? '0 10px' : '0',
+      }}>
         <button
           style={activeTab === 'messages' ? styles.tabActive : styles.tab}
           onClick={() => setActiveTab('messages')}
@@ -255,8 +292,14 @@ export default function App() {
 
       {activeTab === 'messages' && (
         <>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Programar mensaje</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Programar mensaje</h2>
             <GroupList
               groups={groups}
               selected={selectedGroup}
@@ -270,8 +313,14 @@ export default function App() {
             )}
           </div>
 
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Mensajes programados</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Mensajes programados</h2>
             <MessageList messages={messages} onRefresh={refreshMessages} />
           </div>
         </>
@@ -279,13 +328,25 @@ export default function App() {
 
       {activeTab === 'status' && (
         <>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Programar estado</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Programar estado</h2>
             <StatusForm onCreated={refreshStatusUpdates} />
           </div>
 
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Estados programados</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Estados programados</h2>
             <StatusList statusUpdates={statusUpdates} onRefresh={refreshStatusUpdates} />
           </div>
         </>
@@ -293,12 +354,24 @@ export default function App() {
 
       {activeTab === 'contacts' && (
         <>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Contactos de grupos</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Contactos de grupos</h2>
             <ContactList />
           </div>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Mensajes directos programados</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Mensajes directos programados</h2>
             <DirectMessageList />
           </div>
         </>
@@ -306,13 +379,25 @@ export default function App() {
 
       {activeTab === 'quick' && (
         <>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Enviar mensaje a numeros</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Enviar mensaje a numeros</h2>
             <QuickMessageForm />
           </div>
 
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Mensajes directos programados</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Mensajes directos programados</h2>
             <DirectMessageList />
           </div>
         </>
@@ -320,20 +405,38 @@ export default function App() {
 
       {activeTab === 'agenda' && (
         <>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Contactos de agenda</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Contactos de agenda</h2>
             <AgendaList />
           </div>
-          <div style={styles.section}>
-            <h2 style={styles.sectionTitle}>Mensajes directos programados</h2>
+          <div style={{
+            ...styles.section,
+            padding: isMobile ? '12px' : '20px',
+          }}>
+            <h2 style={{
+              ...styles.sectionTitle,
+              fontSize: isMobile ? '16px' : '18px',
+            }}>Mensajes directos programados</h2>
             <DirectMessageList />
           </div>
         </>
       )}
 
       {activeTab === 'published' && (
-        <div style={styles.section}>
-          <h2 style={styles.sectionTitle}>Estados publicados</h2>
+        <div style={{
+          ...styles.section,
+          padding: isMobile ? '12px' : '20px',
+        }}>
+          <h2 style={{
+            ...styles.sectionTitle,
+            fontSize: isMobile ? '16px' : '18px',
+          }}>Estados publicados</h2>
           <PublishedStatusList
             statuses={publishedStatuses}
             onDelete={() => fetchPublishedStatuses().then(setPublishedStatuses)}

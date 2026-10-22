@@ -15,7 +15,7 @@
 | [04 — Calidad, arquitectura y fiabilidad](04-calidad-arquitectura.md) | Deuda técnica no relacionada con seguridad |
 | [05 — Dependencias vulnerables](05-dependencias.md) | Resultado de `npm audit` y estrategia de actualización |
 | [06 — Cumplimiento legal y riesgo de plataforma](06-cumplimiento-legal.md) | Ban de WhatsApp, tratamiento de datos personales |
-| [07 — Correcciones aplicadas](07-correcciones-aplicadas.md) | **Qué se corrigió el 14/10/2026, cómo se verificó y qué queda abierto** |
+| [07 — Correcciones aplicadas](07-correcciones-aplicadas.md) | **Qué se corrigió (14/10/2026 y estados por LID 21–22/10/2026), cómo se verificó y qué queda abierto** |
 
 ---
 

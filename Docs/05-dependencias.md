@@ -171,8 +171,8 @@ npm run build
 
 ### Pruebas manuales obligatorias tras la actualización
 
-Como no hay pruebas automatizadas, la verificación es manual. Baileys es la actualización de
-mayor riesgo:
+`npm test` cubre la API, pero no habla con WhatsApp: lo que toca el protocolo se verifica a
+mano. Baileys es la actualización de mayor riesgo:
 
 - [ ] Arranque del servidor sin errores
 - [ ] Generación y visualización del código QR
@@ -181,7 +181,8 @@ mayor riesgo:
 - [ ] Listado de grupos (`GET /api/groups`)
 - [ ] Envío de un mensaje de texto a un grupo
 - [ ] Envío de un mensaje con imagen
-- [ ] Publicación de un estado con imagen
+- [ ] Publicación de un estado con imagen, comprobando que se **ve en el teléfono** (no basta
+      con que WhatsApp lo acepte: ver [07](07-correcciones-aplicadas.md#estados-no-compatibles-cuentas-migradas-a-lid))
 - [ ] Verificación de números de la agenda (`POST /api/agenda/check`)
 - [ ] Mensaje directo inmediato y programado
 - [ ] Desvinculación y re-vinculación

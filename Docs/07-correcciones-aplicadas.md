@@ -254,10 +254,56 @@ Errores corregidos en esta ronda:
 - En `npm run dev` faltaba el proxy de `/socket.io`, así que el tiempo real no funcionaba.
 - La limpieza diaria de huérfanos ya no borra archivos de menos de una hora (subidas en curso).
 
+## Estados «no compatibles» (cuentas migradas a LID)
+
+> **21–22 de octubre de 2026 · ◐ pendiente de verificar en el teléfono.** El cambio está
+> aplicado y WhatsApp acepta los envíos, pero falta confirmar que el estado se ve.
+
+**Síntoma.** Los estados publicados desde la app (con imagen o de texto) WhatsApp los
+aceptaba, pero en WhatsApp Web aparecían como *«Recibiste un estado, pero no es compatible
+con esta versión de WhatsApp»* y en el teléfono del autor no aparecían. Los del 18/10, con
+la misma versión de Baileys y prácticamente el mismo código, sí se vieron.
+
+**Diagnóstico.** Se descartaron, en este orden:
+
+| Hipótesis | Resultado |
+|---|---|
+| Imagen inválida | No: JPEG válido de 1130×1600 |
+| Formato del id del mensaje (`generateMessageID`, 40 caracteres) | Cambiado al formato actual (`generateMessageIDV2`); no lo resolvió |
+| Falta `messageContextInfo.messageSecret` (Baileys 7 lo añade siempre) | Añadido; no lo resolvió por sí solo |
+| Rechazo del servidor | No: el `ack` llega sin error |
+
+Con `WA_TRACE_FILE` se volcó el tráfico del protocolo y se compararon las claves de grupo
+guardadas en la sesión (`sender-key-status@broadcast--<emisor>--<dispositivo>`): los estados
+de los contactos **y los del propio teléfono** llegan firmados con su **LID**, mientras que la
+app firmaba con el número de teléfono (PN) y repartía la clave a 5.588 dispositivos
+direccionados por PN. Baileys 6.7.24 no sabe direccionar estados por LID; Baileys 7 sí
+(`groupSenderIdentity = meLid`).
+
+**Corrección** (`server/src/whatsapp.js`):
+
+- `relayStatusAsLid()`: una consulta usync con los protocolos de dispositivos y LID obtiene la
+  LID y los dispositivos de cada destinatario; el estado se cifra con la clave de grupo de la
+  LID propia, se reparte por LID y la estrofa lleva `type='media'` en las imágenes, como en
+  Baileys 7. Los destinatarios sin LID se omiten y se cuentan en el log. Si la cuenta no tiene
+  LID se usa el envío anterior.
+- El mensaje se genera a mano (`generateWAMessageContent`) para añadir `messageSecret`.
+- Los estados de texto llevan color de fondo y fuente (`font: 1`; Baileys descarta el 0).
+- Se escucha `messages.update`: un estado rechazado por WhatsApp devuelve un 502 en vez de
+  darse por publicado.
+- `WA_TRACE_FILE` (sólo diagnóstico) vuelca el tráfico del protocolo y registra la estructura
+  de los estados enviados y recibidos.
+
+**Verificación pendiente.** Publicar un estado con imagen y audiencia «Solo yo» y comprobar
+que aparece en el teléfono y en WhatsApp Web; después, con una audiencia real. La solución de
+fondo es migrar a Baileys 7, que trae este direccionamiento de serie.
+
 ## Lo que queda abierto
 
 | Hallazgo | Por qué sigue abierto |
 |---|---|
 | **SEC-004** (TLS) | Requiere dominio y certificado: decisión del operador |
 | **SEC-002** (historial de git) | La purga del historial reescribe commits y debe coordinarla el operador |
+| Estados por LID | Falta confirmar en el teléfono que el estado se ve (ver arriba) |
+| Baileys 7 | La 6.7.24 no maneja LID de serie; el envío de estados lo suple a mano |
 | Cumplimiento (doc. 06) | Consentimiento, baja y aviso de privacidad siguen sin implementarse |

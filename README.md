@@ -18,7 +18,10 @@ Plataforma de automatización de WhatsApp con interfaz web. Programa mensajes a 
 ### Estados de WhatsApp
 - Publica estados de texto, imagen o ambos
 - Programación o envío inmediato
-- Se envían únicamente a tus contactos de agenda verificados en WhatsApp
+- Audiencia a elegir: todos, sólo agenda verificada, sólo contactos de grupos, los miembros
+  de grupos concretos o «Solo yo» (para probar sin que lo vea nadie más)
+- Vista previa de enlaces en estados de texto y mensajes
+- Si WhatsApp rechaza un estado, la interfaz lo informa en vez de darlo por publicado
 
 ### Contactos de grupos
 - Sincronización automática de participantes de todos tus grupos
@@ -87,6 +90,9 @@ Completa en `.env`:
 | `BEHIND_TLS` | `true` sólo si un proxy sirve la app por HTTPS |
 | `ALLOWED_ORIGIN` | Orígenes CORS permitidos; vacío = sólo mismo origen |
 | `RETENTION_DAYS` | Días de conservación del historial enviado |
+| `LOG_LEVEL` | Nivel de log (`info` por defecto) |
+| `TRUST_PROXY` | Valor de `trust proxy` de Express; `loopback` por defecto (nginx en la misma máquina) |
+| `WA_TRACE_FILE` | Sólo diagnóstico: ruta donde volcar todo el tráfico del protocolo de WhatsApp. Déjala vacía en uso normal |
 
 > `.env`, `.credenciales-local.txt` y el directorio de datos están en `.gitignore`.
 > Nunca los subas al repositorio.
@@ -113,7 +119,7 @@ tmux kill-session -t auto-whatsapp  # detener
 
 ```bash
 cd server
-npm test          # pruebas de autenticación, validación y parser VCF
+npm test          # pruebas de autenticación, validación, endurecimiento, audiencia de estados, vista previa de enlaces y parser VCF
 npm run lint      # análisis estático
 npm audit         # vulnerabilidades en dependencias
 ```
@@ -224,11 +230,18 @@ auto-whatsapp/
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
 | GET | `/api/status-updates` | Listar estados programados |
+| GET | `/api/status-audience` | Recuento de destinatarios por tipo de audiencia |
 | POST | `/api/status-updates` | Crear estado programado |
 | POST | `/api/status-updates/send-now` | Publicar estado inmediatamente |
 | PUT | `/api/status-updates/:id` | Editar estado pendiente |
 | DELETE | `/api/status-updates/:id` | Cancelar estado pendiente |
 | DELETE | `/api/status-updates/:id/permanent` | Eliminar estado |
+
+### Vista previa de enlaces
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/api/link-preview?url=` | Título, descripción e imagen de una URL (protegido contra SSRF) |
+| GET | `/api/link-preview/image?url=` | Proxy de la imagen de la vista previa |
 
 ### Contactos de grupos
 | Método | Endpoint | Descripción |
@@ -259,7 +272,9 @@ auto-whatsapp/
 
 ## Notas
 
-- La sesión de WhatsApp se almacena en `auth_info/`. No borrar este directorio a menos que quieras desvincular manualmente.
-- La base de datos se almacena en `data.db` en la raíz del proyecto.
-- Las imágenes subidas se guardan en `uploads/`.
+- Todo lo persistente vive en `DATA_DIR` (por defecto `data/`): la sesión de WhatsApp en
+  `auth_info/`, la base de datos en `data.db` y las imágenes en `uploads/`. No borres
+  `auth_info/` salvo que quieras desvincular manualmente.
+- Las cuentas de WhatsApp migradas a LID necesitan que los estados se firmen y direccionen
+  por LID; ver [Docs/07](Docs/07-correcciones-aplicadas.md#estados-no-compatibles-cuentas-migradas-a-lid).
 - Para producción, se recomienda usar Nginx como reverse proxy (ver `auto-whatsapp-nginx.conf`).

@@ -1,0 +1,16 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /server
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    ignore:
+      # Baileys se actualiza a mano y probando la vinculación (ver Docs/05-dependencias.md)
+      - dependency-name: '@whiskeysockets/baileys'
+  - package-ecosystem: npm
+    directory: /client
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: monthly }

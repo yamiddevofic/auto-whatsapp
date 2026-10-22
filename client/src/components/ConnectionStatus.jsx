@@ -1,93 +1,43 @@
 import React from 'react';
+import { Icon, Modal, Button } from './ui.jsx';
 
-const statusColors = {
-  connected: '#25D366',
-  connecting: '#FFA726',
-  disconnected: '#EF5350',
-};
-
-const statusLabels = {
+const LABELS = {
   connected: 'Conectado',
-  connecting: 'Esperando QR...',
+  connecting: 'Esperando QR…',
   disconnected: 'Desconectado',
 };
 
-const styles = {
-  container: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 8,
-  },
-  dot: (color) => ({
-    width: 12,
-    height: 12,
-    borderRadius: '50%',
-    backgroundColor: color,
-  }),
-  label: {
-    fontSize: 14,
-    fontWeight: 500,
-  },
-  qrContainer: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.6)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-  },
-  qrCard: {
-    background: '#fff',
-    padding: 24,
-    borderRadius: 12,
-    textAlign: 'center',
-  },
-  qrImg: {
-    width: 280,
-    height: 280,
-  },
-};
-
 export default function ConnectionStatus({ status, qr }) {
-
-  const color = statusColors[status] || statusColors.disconnected;
+  const key = LABELS[status] ? status : 'disconnected';
+  const closeQr = () => window.dispatchEvent(new CustomEvent('close-qr'));
 
   return (
     <>
-      <div style={styles.container}>
-        <div style={styles.dot(color)} />
-        <span style={styles.label}>{statusLabels[status] || status}</span>
+      <div className={`conn is-${key}`} role="status" aria-live="polite">
+        <span className="conn-dot" />
+        {LABELS[key]}
       </div>
 
       {qr && (
-        <div style={styles.qrContainer}>
-          <div style={styles.qrCard}>
-            <h3 style={{ margin: '0 0 16px' }}>Escanea el QR con WhatsApp</h3>
-            <img src={qr} alt="QR Code" style={styles.qrImg} />
-            <button
-              style={{
-                marginTop: '16px',
-                padding: '8px 16px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '14px',
-              }}
-              onClick={() => {
-                // This will be handled by parent component
-                window.dispatchEvent(new CustomEvent('close-qr'));
-              }}
-            >
-              Cerrar
-            </button>
+        <Modal onClose={closeQr} className="modal-qr" labelledBy="qr-title">
+          <div className="modal-head" style={{ justifyContent: 'center', textAlign: 'center' }}>
+            <div>
+              <h3 id="qr-title">Vincula tu WhatsApp</h3>
+              <p>Escanea el código desde tu teléfono.</p>
+            </div>
           </div>
-        </div>
+          <div className="modal-body">
+            <div className="qr-frame"><img src={qr} alt="Código QR para vincular WhatsApp" /></div>
+            <ol className="steps">
+              <li>Abre WhatsApp en tu teléfono</li>
+              <li>Ve a <b>Ajustes → Dispositivos vinculados</b></li>
+              <li>Toca <b>Vincular un dispositivo</b> y apunta a este código</li>
+            </ol>
+          </div>
+          <div className="modal-foot">
+            <Button variant="secondary" onClick={closeQr} data-autofocus>Cerrar</Button>
+          </div>
+        </Modal>
       )}
     </>
   );

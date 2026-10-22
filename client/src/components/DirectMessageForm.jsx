@@ -1,104 +1,26 @@
 import React, { useState } from 'react';
 import ImageUpload from './ImageUpload.jsx';
+import { useLinkTools, LinkPanel, BubbleLinkCard } from './LinkTools.jsx';
 import { createDirectMessage } from '../api.js';
-
-const styles = {
-  container: {
-    background: '#F1F8E9',
-    border: '1px solid #AED581',
-    borderRadius: 8,
-    padding: 16,
-    marginTop: 12,
-  },
-  title: {
-    margin: '0 0 12px',
-    fontSize: 15,
-    fontWeight: 600,
-    color: '#33691E',
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-  },
-  label: {
-    fontSize: 13,
-    fontWeight: 500,
-    marginBottom: 4,
-    color: '#333',
-  },
-  textarea: {
-    width: '100%',
-    minHeight: 80,
-    padding: 10,
-    fontSize: 14,
-    border: '1px solid #ccc',
-    borderRadius: 6,
-    resize: 'vertical',
-    fontFamily: 'inherit',
-    marginBottom: 8,
-    boxSizing: 'border-box',
-  },
-  dateInput: {
-    padding: '8px 12px',
-    fontSize: 14,
-    border: '1px solid #ccc',
-    borderRadius: 6,
-    marginBottom: 12,
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-  btnRow: {
-    display: 'flex',
-    gap: 8,
-    alignItems: 'center',
-  },
-  submitBtn: {
-    padding: '10px 20px',
-    fontSize: 14,
-    fontWeight: 600,
-    color: '#fff',
-    backgroundColor: '#25D366',
-    border: 'none',
-    borderRadius: 6,
-    cursor: 'pointer',
-  },
-  cancelBtn: {
-    padding: '10px 16px',
-    fontSize: 13,
-    fontWeight: 500,
-    color: '#555',
-    backgroundColor: '#e0e0e0',
-    border: 'none',
-    borderRadius: 6,
-    cursor: 'pointer',
-  },
-  feedback: {
-    marginTop: 8,
-    padding: 8,
-    borderRadius: 6,
-    fontSize: 13,
-  },
-  selectedInfo: {
-    fontSize: 13,
-    color: '#555',
-    marginBottom: 8,
-  },
-};
+import { Button, Field, Alert, Icon, ScheduleField, WaPreview, toast } from './ui.jsx';
 
 export default function DirectMessageForm({ selectedContacts, onClose, onSent }) {
   const [content, setContent] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState(null);
+  const [error, setError] = useState(null);
+
+  const link = useLinkTools({ text: content, setText: setContent, addImage: setImage, removeImage: (f) => setImage((cur) => (cur === f ? null : cur)) });
+
+  const isValid = content.trim() && scheduledAt && selectedContacts.length > 0;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!content.trim() || !scheduledAt || selectedContacts.length === 0) return;
+    if (!isValid) return;
 
     setLoading(true);
-    setFeedback(null);
+    setError(null);
 
     const formData = new FormData();
     formData.append('recipients', JSON.stringify(selectedContacts.map((c) => c.jid)));
@@ -109,77 +31,50 @@ export default function DirectMessageForm({ selectedContacts, onClose, onSent })
 
     try {
       const result = await createDirectMessage(formData);
+      if (!result) return;
       if (result.error) {
-        setFeedback({ type: 'error', text: result.error });
+        setError(result.error);
       } else {
-        setFeedback({ type: 'success', text: 'Mensaje programado correctamente' });
+        toast.success(`Mensaje programado para ${selectedContacts.length} contacto(s)`);
         setContent('');
         setScheduledAt('');
         setImage(null);
         if (onSent) onSent();
       }
     } catch {
-      setFeedback({ type: 'error', text: 'Error al programar el mensaje' });
+      setError('No se pudo programar el mensaje.');
     } finally {
       setLoading(false);
     }
   };
 
-  const isValid = content.trim() && scheduledAt && selectedContacts.length > 0;
-
   return (
-    <div style={styles.container}>
-      <h4 style={styles.title}>Programar mensaje a contactos</h4>
-      <p style={styles.selectedInfo}>
-        {selectedContacts.length} contacto(s) seleccionado(s)
-      </p>
-      <form onSubmit={handleSubmit} style={styles.form}>
-        <label style={styles.label}>Mensaje</label>
-        <textarea
-          style={styles.textarea}
-          value={content}
-          onChange={(e) => setContent(e.target.value)}
-          placeholder="Escribe tu mensaje..."
-        />
-
-        <ImageUpload file={image} onFileChange={setImage} />
-
-        <label style={styles.label}>Fecha y hora de envio</label>
-        <input
-          type="datetime-local"
-          style={styles.dateInput}
-          value={scheduledAt}
-          onChange={(e) => setScheduledAt(e.target.value)}
-        />
-
-        <div style={styles.btnRow}>
-          <button
-            type="submit"
-            disabled={!isValid || loading}
-            style={{
-              ...styles.submitBtn,
-              ...(!isValid || loading ? { opacity: 0.6, cursor: 'not-allowed' } : {}),
-            }}
-          >
-            {loading ? 'Programando...' : 'Programar mensaje'}
-          </button>
-          <button type="button" style={styles.cancelBtn} onClick={onClose}>
-            Cancelar
-          </button>
+    <section className="card" aria-label="Programar mensaje a contactos" style={{ borderColor: 'var(--accent)' }}>
+      <header className="card-head">
+        <div>
+          <h3 className="card-title">Programar mensaje</h3>
+          <p className="card-sub">{selectedContacts.length} contacto(s) seleccionado(s)</p>
         </div>
-
-        {feedback && (
-          <div
-            style={{
-              ...styles.feedback,
-              background: feedback.type === 'success' ? '#E8F5E9' : '#FFEBEE',
-              color: feedback.type === 'success' ? '#2E7D32' : '#C62828',
-            }}
-          >
-            {feedback.text}
+        <Button variant="ghost" size="sm" className="btn-icon" onClick={onClose} aria-label="Cerrar formulario"><Icon name="x" size="sm" /></Button>
+      </header>
+      <form onSubmit={handleSubmit} className="card-body compose-grid">
+        <div className="stack">
+          <Field label="Mensaje" htmlFor="dm-content">
+            <textarea id="dm-content" onPaste={link.onPaste} className="textarea" value={content} onChange={(e) => setContent(e.target.value)} placeholder="Escribe tu mensaje…" autoFocus />
+          </Field>
+        <LinkPanel tools={link} setText={setContent} addImage={setImage} />
+          <ImageUpload file={image} onFileChange={setImage} />
+          <ScheduleField value={scheduledAt} onChange={setScheduledAt} />
+          {error && <Alert type="error">{error}</Alert>}
+          <div className="row">
+            <Button type="submit" variant="primary" icon="clock" loading={loading} disabled={!isValid}>
+              {loading ? 'Programando…' : 'Programar mensaje'}
+            </Button>
+            <Button type="button" onClick={onClose}>Cancelar</Button>
           </div>
-        )}
+        </div>
+        <aside className="compose-aside"><WaPreview text={content} imageFile={image} when={scheduledAt} linkCard={<BubbleLinkCard preview={link.preview} />} /></aside>
       </form>
-    </div>
+    </section>
   );
 }

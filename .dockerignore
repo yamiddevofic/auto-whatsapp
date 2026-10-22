@@ -1,14 +1,25 @@
-node_modules
+**/node_modules
 npm-debug.log
 .git
 .gitignore
+.github
+Docs
+
+# Secretos y credenciales: se inyectan en tiempo de ejecución con --env-file
+.env
+.env.*
+!.env.example
+.credenciales-local.txt
+
+# Datos en reposo
+data
 auth_info
 uploads
 data.db
 data.db-shm
 data.db-wal
-.env
-.env.local
-dist
+
+client/dist
+server/test
 .DS_Store
 *.log

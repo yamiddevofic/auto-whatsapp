@@ -1,170 +1,179 @@
 import { Router } from 'express';
-import { createDirectMessage, getAllDirectMessages, cancelDirectMessage, getDirectMessageById, updateDirectMessage, deleteDirectMessage } from '../db.js';
-import { scheduleDirectMessage, cancelScheduledDirectMessage } from '../scheduler.js';
-import { sendMessage, checkOnWhatsApp } from '../whatsapp.js';
-import { io } from '../index.js';
+import crypto from 'crypto';
+import {
+  createDirectMessage, getAllDirectMessages, cancelDirectMessage, getDirectMessageById,
+  updateDirectMessage, deleteDirectMessage, canSendMoreMessages, incrementMessageCount,
+  getDailyLimit, deleteAttachment,
+} from '../db.js';
+import { scheduleDirectMessage, cancelScheduledDirectMessage, randomSendDelay } from '../scheduler.js';
+import { sendMessage, checkOnWhatsApp, isConnected } from '../whatsapp.js';
+import { emit } from '../realtime.js';
+import { logger, maskJid } from '../logger.js';
+import { validate } from '../middleware/validate.js';
+import {
+  createDirectMessageSchema, sendDirectNowSchema, updateDirectMessageSchema,
+} from '../schemas.js';
+import { parseId, httpError, asyncRoute } from '../middleware/error-handler.js';
 
 const router = Router();
 
 router.get('/api/direct-messages', (req, res) => {
-  const messages = getAllDirectMessages();
-  res.json(messages);
+  res.json(getAllDirectMessages());
 });
 
-// Send immediately to phone numbers
-router.post('/api/direct-messages/send-now', async (req, res) => {
+/** Envía a cada número con retardo aleatorio y publica el resultado por WebSocket. */
+async function runImmediateSend(jobId, numbers, content, imagePath) {
+  const results = [];
   try {
-    let { numbers, content } = req.body;
-    const imagePath = req.file ? req.file.path : null;
+    for (const [index, number] of numbers.entries()) {
+      if (!canSendMoreMessages(1)) {
+        results.push({ number, status: 'failed', error: 'Límite diario alcanzado' });
+        continue;
+      }
 
-    console.log('[DirectMessages] send-now body:', { numbers, content: content?.substring(0, 30), imagePath });
-
-    if (!content && !imagePath) {
-      return res.status(400).json({ error: 'Se requiere texto o imagen' });
-    }
-
-    // Parse numbers: comma-separated string
-    if (typeof numbers === 'string') {
-      numbers = numbers.split(',').map((n) => n.trim()).filter(Boolean);
-    }
-
-    if (!numbers || numbers.length === 0) {
-      return res.status(400).json({ error: 'Ingresa al menos un numero' });
-    }
-
-    // Validate each number on WhatsApp and collect JIDs
-    const results = [];
-    for (const num of numbers) {
-      console.log(`[DirectMessages] Checking number: ${num}`);
-      const jid = await checkOnWhatsApp(num);
-      if (jid) {
-        try {
-          console.log(`[DirectMessages] Sending to ${jid}`);
-          await sendMessage(jid, content || null, imagePath);
-          results.push({ number: num, status: 'sent' });
-        } catch (err) {
-          console.error(`[DirectMessages] Failed to send to ${jid}:`, err.message);
-          results.push({ number: num, status: 'failed', error: err.message });
+      try {
+        const jid = await checkOnWhatsApp(number);
+        if (!jid) {
+          results.push({ number, status: 'not_found', error: 'Numero no encontrado en WhatsApp' });
+          continue;
         }
-      } else {
-        console.log(`[DirectMessages] Number not found on WhatsApp: ${num}`);
-        results.push({ number: num, status: 'not_found', error: 'Numero no encontrado en WhatsApp' });
-      }
-    }
-
-    const sent = results.filter((r) => r.status === 'sent').length;
-    res.json({ success: true, sent, total: numbers.length, results });
-  } catch (err) {
-    console.error('[DirectMessages] Send now failed:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-router.post('/api/direct-messages', async (req, res) => {
-  try {
-    let { recipients, recipientLabel, content, scheduledAt, numbers } = req.body;
-
-    // recipients comes as JSON string from FormData
-    if (typeof recipients === 'string') {
-      try { recipients = JSON.parse(recipients); } catch { recipients = null; }
-    }
-
-    // If numbers provided (comma-separated), resolve them to JIDs
-    if (!recipients && numbers) {
-      const numList = typeof numbers === 'string'
-        ? numbers.split(',').map((n) => n.trim()).filter(Boolean)
-        : numbers;
-
-      const jids = [];
-      const notFound = [];
-      for (const num of numList) {
-        const jid = await checkOnWhatsApp(num);
-        if (jid) {
-          jids.push(jid);
-        } else {
-          notFound.push(num);
-        }
+        await sendMessage(jid, content || null, imagePath);
+        incrementMessageCount();
+        results.push({ number, status: 'sent' });
+        logger.info({ jid: maskJid(jid) }, 'Mensaje directo enviado');
+      } catch (err) {
+        logger.error({ number: maskJid(number), err: err.message }, 'Fallo al enviar mensaje directo');
+        results.push({ number, status: 'failed', error: 'No se pudo enviar' });
       }
 
-      if (notFound.length > 0 && jids.length === 0) {
-        return res.status(400).json({ error: `Ningun numero encontrado en WhatsApp: ${notFound.join(', ')}` });
+      // Retardo aleatorio también en el envío inmediato, para no disparar la detección
+      // antispam de WhatsApp.
+      if (index < numbers.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, randomSendDelay()));
       }
-
-      recipients = jids;
-      recipientLabel = recipientLabel || `${jids.length} numero(s)${notFound.length > 0 ? ` (${notFound.length} no encontrados)` : ''}`;
     }
-
-    if (!recipients || !Array.isArray(recipients) || recipients.length === 0) {
-      return res.status(400).json({ error: 'Selecciona al menos un contacto' });
-    }
-    if (!content || !scheduledAt) {
-      return res.status(400).json({ error: 'Faltan campos requeridos: content, scheduledAt' });
-    }
-
-    const imagePath = req.file ? req.file.path : null;
-
-    const msg = createDirectMessage({
-      recipients,
-      recipientLabel: recipientLabel || `${recipients.length} contactos`,
-      content,
-      imagePath,
-      scheduledAt,
+  } finally {
+    emit('direct-messages:send-now-result', {
+      jobId,
+      sent: results.filter((r) => r.status === 'sent').length,
+      total: numbers.length,
+      results,
     });
+    // El adjunto de un envío inmediato no lo referencia ninguna fila
+    deleteAttachment(imagePath);
+  }
+}
 
-    scheduleDirectMessage(msg);
-    io.emit('direct-messages:updated', getAllDirectMessages());
-    res.status(201).json(msg);
+// Envío inmediato a números concretos. El número de destinatarios está acotado por el
+// esquema y se respeta el límite diario anti-bloqueo (SEC-014). Responde 202 y trabaja en
+// segundo plano: con el retardo entre envíos la petición duraría minutos y los proxies la
+// cortarían (ARQ-009).
+router.post('/api/direct-messages/send-now', validate(sendDirectNowSchema), (req, res, next) => {
+  try {
+    const { numbers, content } = req.body;
+    const imagePath = req.file ? req.file.path : null;
+
+    if (!content && !imagePath) throw httpError(400, 'Se requiere texto o imagen');
+    if (!isConnected()) throw httpError(503, 'WhatsApp no está conectado');
+    if (!canSendMoreMessages(numbers.length)) {
+      throw httpError(429, `Límite diario de mensajes alcanzado (${getDailyLimit()})`);
+    }
+
+    const jobId = crypto.randomUUID();
+    res.status(202).json({ accepted: true, jobId, total: numbers.length });
+
+    runImmediateSend(jobId, numbers, content, imagePath).catch((err) =>
+      logger.error({ err: err.message }, 'El envío inmediato falló'));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-router.delete('/api/direct-messages/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const msg = getDirectMessageById(id);
+router.post('/api/direct-messages', validate(createDirectMessageSchema), asyncRoute(async (req, res) => {
+  const { content, scheduledAt, numbers } = req.body;
+  let { recipients, recipientLabel } = req.body;
 
-  if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
-  if (msg.status !== 'pending') return res.status(400).json({ error: 'Solo se pueden cancelar mensajes pendientes' });
+  // Si llegan números en lugar de JIDs, se resuelven contra WhatsApp
+  if ((!recipients || recipients.length === 0) && numbers?.length) {
+    const jids = [];
+    const notFound = [];
 
-  cancelScheduledDirectMessage(id);
-  cancelDirectMessage(id);
-  io.emit('direct-messages:updated', getAllDirectMessages());
-  res.json({ success: true });
+    for (const number of numbers) {
+      const jid = await checkOnWhatsApp(number);
+      if (jid) jids.push(jid);
+      else notFound.push(number);
+    }
+
+    if (jids.length === 0) {
+      throw httpError(400, `Ningun numero encontrado en WhatsApp: ${notFound.join(', ')}`);
+    }
+
+    recipients = jids;
+    recipientLabel = recipientLabel
+      || `${jids.length} numero(s)${notFound.length > 0 ? ` (${notFound.length} no encontrados)` : ''}`;
+  }
+
+  if (!recipients || recipients.length === 0) {
+    throw httpError(400, 'Selecciona al menos un contacto');
+  }
+
+  const msg = createDirectMessage({
+    recipients,
+    recipientLabel: recipientLabel || `${recipients.length} contactos`,
+    content,
+    imagePath: req.file ? req.file.path : null,
+    scheduledAt,
+  });
+
+  scheduleDirectMessage(msg);
+  emit('direct-messages:updated', getAllDirectMessages());
+  res.status(201).json(msg);
+}));
+
+router.delete('/api/direct-messages/:id', parseId, (req, res, next) => {
+  try {
+    const msg = getDirectMessageById(req.id);
+    if (!msg) throw httpError(404, 'Mensaje no encontrado');
+    if (msg.status !== 'pending') throw httpError(400, 'Solo se pueden cancelar mensajes pendientes');
+
+    cancelScheduledDirectMessage(req.id);
+    cancelDirectMessage(req.id);
+    emit('direct-messages:updated', getAllDirectMessages());
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
 });
 
-router.put('/api/direct-messages/:id', (req, res) => {
+router.put('/api/direct-messages/:id', parseId, validate(updateDirectMessageSchema), (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
-    const msg = getDirectMessageById(id);
+    const msg = getDirectMessageById(req.id);
+    if (!msg) throw httpError(404, 'Mensaje no encontrado');
+    if (msg.status !== 'pending') throw httpError(400, 'Solo se pueden editar mensajes pendientes');
 
-    if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
-    if (msg.status !== 'pending') return res.status(400).json({ error: 'Solo se pueden editar mensajes pendientes' });
-
-    const { content, scheduledAt } = req.body;
-    const updated = updateDirectMessage(id, { content, scheduledAt });
-
-    cancelScheduledDirectMessage(id);
+    const updated = updateDirectMessage(req.id, req.body);
+    cancelScheduledDirectMessage(req.id);
     scheduleDirectMessage(updated);
-    io.emit('direct-messages:updated', getAllDirectMessages());
+    emit('direct-messages:updated', getAllDirectMessages());
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-router.delete('/api/direct-messages/:id/permanent', (req, res) => {
-  const id = parseInt(req.params.id);
-  const msg = getDirectMessageById(id);
+router.delete('/api/direct-messages/:id/permanent', parseId, (req, res, next) => {
+  try {
+    const msg = getDirectMessageById(req.id);
+    if (!msg) throw httpError(404, 'Mensaje no encontrado');
 
-  if (!msg) return res.status(404).json({ error: 'Mensaje no encontrado' });
+    if (msg.status === 'pending') cancelScheduledDirectMessage(req.id);
 
-  if (msg.status === 'pending') {
-    cancelScheduledDirectMessage(id);
+    deleteDirectMessage(req.id);
+    emit('direct-messages:updated', getAllDirectMessages());
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
   }
-
-  deleteDirectMessage(id);
-  io.emit('direct-messages:updated', getAllDirectMessages());
-  res.json({ success: true });
 });
 
 export default router;

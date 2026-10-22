@@ -1,101 +1,84 @@
 import { Router } from 'express';
-import { createMessage, getAllMessages, cancelMessage, getMessageById, updateMessage, deleteMessage } from '../db.js';
+import {
+  createMessage, getAllMessages, cancelMessage, getMessageById, updateMessage, deleteMessage,
+} from '../db.js';
 import { scheduleMessage, cancelScheduledMessage } from '../scheduler.js';
-import { io } from '../index.js';
+import { emit } from '../realtime.js';
+import { validate } from '../middleware/validate.js';
+import { createMessageSchema, updateMessageSchema } from '../schemas.js';
+import { parseId, httpError } from '../middleware/error-handler.js';
 
 const router = Router();
 
 router.get('/api/messages', (req, res) => {
-  const messages = getAllMessages();
-  res.json(messages);
+  res.json(getAllMessages());
 });
 
-router.post('/api/messages', (req, res) => {
+router.post('/api/messages', validate(createMessageSchema), (req, res, next) => {
   try {
     const { groupId, groupName, content, scheduledAt } = req.body;
-
-    if (!groupId || !groupName || !content || !scheduledAt) {
-      return res.status(400).json({ error: 'Missing required fields: groupId, groupName, content, scheduledAt' });
-    }
-
-    const imagePath = req.file ? req.file.path : null;
 
     const msg = createMessage({
       groupId,
       groupName,
       content,
-      imagePath,
+      imagePath: req.file ? req.file.path : null,
       scheduledAt,
     });
 
     scheduleMessage(msg);
-    io.emit('messages:updated', getAllMessages());
+    emit('messages:updated', getAllMessages());
     res.status(201).json(msg);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-router.delete('/api/messages/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const msg = getMessageById(id);
-
-  if (!msg) {
-    return res.status(404).json({ error: 'Message not found' });
-  }
-
-  if (msg.status !== 'pending') {
-    return res.status(400).json({ error: 'Only pending messages can be cancelled' });
-  }
-
-  cancelScheduledMessage(id);
-  cancelMessage(id);
-  io.emit('messages:updated', getAllMessages());
-  res.json({ success: true });
-});
-
-router.put('/api/messages/:id', (req, res) => {
+router.delete('/api/messages/:id', parseId, (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
-    const msg = getMessageById(id);
+    const msg = getMessageById(req.id);
+    if (!msg) throw httpError(404, 'Mensaje no encontrado');
+    if (msg.status !== 'pending') throw httpError(400, 'Solo se pueden cancelar mensajes pendientes');
 
-    if (!msg) {
-      return res.status(404).json({ error: 'Message not found' });
-    }
+    cancelScheduledMessage(req.id);
+    cancelMessage(req.id);
+    emit('messages:updated', getAllMessages());
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
 
-    if (msg.status !== 'pending') {
-      return res.status(400).json({ error: 'Only pending messages can be edited' });
-    }
+router.put('/api/messages/:id', parseId, validate(updateMessageSchema), (req, res, next) => {
+  try {
+    const msg = getMessageById(req.id);
+    if (!msg) throw httpError(404, 'Mensaje no encontrado');
+    if (msg.status !== 'pending') throw httpError(400, 'Solo se pueden editar mensajes pendientes');
 
-    const { content, scheduledAt, groupId, groupName } = req.body;
-    const updated = updateMessage(id, { content, scheduledAt, groupId, groupName });
+    const updated = updateMessage(req.id, req.body);
 
-    // Reschedule if the time changed
-    cancelScheduledMessage(id);
+    cancelScheduledMessage(req.id);
     scheduleMessage(updated);
-
-    io.emit('messages:updated', getAllMessages());
+    emit('messages:updated', getAllMessages());
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-router.delete('/api/messages/:id/permanent', (req, res) => {
-  const id = parseInt(req.params.id);
-  const msg = getMessageById(id);
+router.delete('/api/messages/:id/permanent', parseId, (req, res, next) => {
+  try {
+    const msg = getMessageById(req.id);
+    if (!msg) throw httpError(404, 'Mensaje no encontrado');
 
-  if (!msg) {
-    return res.status(404).json({ error: 'Message not found' });
+    if (msg.status === 'pending') cancelScheduledMessage(req.id);
+
+    deleteMessage(req.id);
+    emit('messages:updated', getAllMessages());
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
   }
-
-  if (msg.status === 'pending') {
-    cancelScheduledMessage(id);
-  }
-
-  deleteMessage(id);
-  io.emit('messages:updated', getAllMessages());
-  res.json({ success: true });
 });
 
 export default router;

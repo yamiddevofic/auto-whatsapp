@@ -1,32 +1,75 @@
 const BASE = '';
 
-// Helper function to add auth token to requests
-function getHeaders(headers = {}) {
-  const token = localStorage.getItem('token');
-  return {
-    ...headers,
-    ...(token && { 'Authorization': `Bearer ${token}` }),
-  };
+const TOKEN_KEY = 'token';
+const USER_KEY = 'username';
+
+export function getToken() {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
-// Helper function for authenticated fetch
-async function authFetch(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: getHeaders(options.headers),
-  });
+/** Comprueba la expiración del JWT en el cliente para no mostrar una sesión muerta. */
+export function isTokenValid(token = getToken()) {
+  if (!token) return false;
+  try {
+    const { exp } = JSON.parse(atob(token.split('.')[1]));
+    return typeof exp === 'number' && exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+}
 
-  if (response.status === 401) {
-    // Token expired or invalid, clear and let React handle redirect
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    // Dispatch custom event to notify app of logout
-    window.dispatchEvent(new Event('auth-expired'));
+function clearSession() {
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  window.dispatchEvent(new Event('auth-expired'));
+}
+
+/**
+ * Único punto de autenticación del cliente. Soporta JSON y FormData: con FormData no se
+ * fija Content-Type para que el navegador añada el boundary correcto.
+ * Antes este bloque estaba copiado ocho veces. Ver Docs/04-calidad-arquitectura.md ARQ-006.
+ */
+async function authFetch(url, options = {}) {
+  const token = getToken();
+  const headers = { ...options.headers };
+
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const isFormData = options.body instanceof FormData;
+  if (options.body && !isFormData && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+
+  const res = await fetch(url, { ...options, headers });
+
+  if (res.status === 401) {
+    clearSession();
     return null;
   }
 
-  return response;
+  return res;
 }
+
+/** Ejecuta la petición y devuelve el JSON, o null si la sesión expiró. */
+async function request(url, options) {
+  const res = await authFetch(url, options);
+  if (!res) return null;
+  // Una respuesta que no es JSON (p. ej. la página 404 de un servidor desactualizado)
+  // se convierte en un error legible en vez de "Unexpected token '<'".
+  try {
+    return await res.json();
+  } catch {
+    return {
+      error: res.status === 404
+        ? 'El servidor no reconoce esta función: reinícialo para aplicar la última versión.'
+        : `Respuesta inesperada del servidor (${res.status})`,
+    };
+  }
+}
+
+const json = (body) => ({ body: JSON.stringify(body) });
+
+// --- Sesión ---
 
 export async function login(username, password) {
   const res = await fetch(`${BASE}/api/auth/login`, {
@@ -37,287 +80,89 @@ export async function login(username, password) {
   return res.json();
 }
 
-export async function fetchStatus() {
-  const res = await authFetch(`${BASE}/api/status`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function fetchQR() {
-  const res = await authFetch(`${BASE}/api/qr`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function fetchGroups() {
-  const res = await authFetch(`${BASE}/api/groups`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function fetchMessages() {
-  const res = await authFetch(`${BASE}/api/messages`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function createMessage(formData) {
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${BASE}/api/messages`, {
-    method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    window.dispatchEvent(new Event('auth-expired'));
-    return null;
+export async function logout() {
+  try {
+    await authFetch(`${BASE}/api/auth/logout`, { method: 'POST' });
+  } finally {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
   }
-  return res.json();
 }
 
-export async function cancelMessage(id) {
-  const res = await authFetch(`${BASE}/api/messages/${id}`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
+// --- Estado de la conexión ---
 
-export async function updateMessageApi(id, data) {
-  const res = await authFetch(`${BASE}/api/messages/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res) return null;
-  return res.json();
-}
+export const fetchStatus = () => request(`${BASE}/api/status`);
+export const fetchQR = () => request(`${BASE}/api/qr`);
+export const fetchGroups = () => request(`${BASE}/api/groups`);
+// Las operaciones destructivas exigen la contraseña actual (SEC-025)
+export const unlinkWhatsApp = (password) =>
+  request(`${BASE}/api/unlink`, { method: 'POST', ...json({ password }) });
 
-export async function deleteMessageApi(id) {
-  const res = await authFetch(`${BASE}/api/messages/${id}/permanent`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
+// --- Mensajes a grupos ---
 
-// --- Status updates ---
+export const fetchMessages = () => request(`${BASE}/api/messages`);
+export const createMessage = (formData) =>
+  request(`${BASE}/api/messages`, { method: 'POST', body: formData });
+export const cancelMessage = (id) =>
+  request(`${BASE}/api/messages/${id}`, { method: 'DELETE' });
+export const updateMessageApi = (id, data) =>
+  request(`${BASE}/api/messages/${id}`, { method: 'PUT', ...json(data) });
+export const deleteMessageApi = (id) =>
+  request(`${BASE}/api/messages/${id}/permanent`, { method: 'DELETE' });
 
-export async function fetchStatusUpdates() {
-  const res = await authFetch(`${BASE}/api/status-updates`);
-  if (!res) return null;
-  return res.json();
-}
+// --- Estados ---
 
-export async function createStatusUpdate(formData) {
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${BASE}/api/status-updates`, {
-    method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    window.dispatchEvent(new Event('auth-expired'));
-    return null;
-  }
-  return res.json();
-}
+export const fetchStatusUpdates = () => request(`${BASE}/api/status-updates`);
+export const createStatusUpdate = (formData) =>
+  request(`${BASE}/api/status-updates`, { method: 'POST', body: formData });
+export const sendStatusNow = (formData) =>
+  request(`${BASE}/api/status-updates/send-now`, { method: 'POST', body: formData });
+export const cancelStatusUpdate = (id) =>
+  request(`${BASE}/api/status-updates/${id}`, { method: 'DELETE' });
+export const updateStatusUpdateApi = (id, data) =>
+  request(`${BASE}/api/status-updates/${id}`, { method: 'PUT', ...json(data) });
+export const deleteStatusUpdateApi = (id) =>
+  request(`${BASE}/api/status-updates/${id}/permanent`, { method: 'DELETE' });
 
-export async function sendStatusNow(formData) {
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${BASE}/api/status-updates/send-now`, {
-    method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    window.dispatchEvent(new Event('auth-expired'));
-    return null;
-  }
-  return res.json();
-}
+// --- Contactos de grupos ---
 
-export async function cancelStatusUpdate(id) {
-  const res = await authFetch(`${BASE}/api/status-updates/${id}`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
+export const fetchContacts = ({ page = 1, limit = 50, search = '' } = {}) =>
+  request(`${BASE}/api/contacts?${new URLSearchParams({ page, limit, search })}`);
+export const syncContacts = () => request(`${BASE}/api/contacts/sync`, { method: 'POST' });
+export const deleteAllContacts = (password) =>
+  request(`${BASE}/api/contacts`, { method: 'DELETE', ...json({ password }) });
 
-export async function updateStatusUpdateApi(id, data) {
-  const res = await authFetch(`${BASE}/api/status-updates/${id}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  });
-  if (!res) return null;
-  return res.json();
-}
+// --- Agenda ---
 
-export async function deleteStatusUpdateApi(id) {
-  const res = await authFetch(`${BASE}/api/status-updates/${id}/permanent`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
+export const fetchAgenda = ({ page = 1, limit = 50, search = '', filter = 'all' } = {}) =>
+  request(`${BASE}/api/agenda?${new URLSearchParams({ page, limit, search, filter })}`);
+export const fetchAgendaStats = () => request(`${BASE}/api/agenda/stats`);
+export const resetAgendaChecks = (password) =>
+  request(`${BASE}/api/agenda/reset-checks`, { method: 'POST', ...json({ password }) });
+export const deleteAgenda = (password) =>
+  request(`${BASE}/api/agenda`, { method: 'DELETE', ...json({ password }) });
+export const checkAgendaWhatsApp = (countryCode = '') =>
+  request(`${BASE}/api/agenda/check`, { method: 'POST', ...json({ countryCode }) });
 
-// --- Contacts ---
-
-export async function fetchContacts({ page = 1, limit = 50, search = '' } = {}) {
-  const params = new URLSearchParams({ page, limit, search });
-  const res = await authFetch(`${BASE}/api/contacts?${params}`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function syncContacts() {
-  const res = await authFetch(`${BASE}/api/contacts/sync`, {
-    method: 'POST',
-  });
-  if (!res) return null;
-  return res.json();
-}
-
-export async function deleteAllContacts() {
-  const res = await authFetch(`${BASE}/api/contacts`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
-
-// --- Unlink ---
-
-export async function unlinkWhatsApp() {
-  const res = await authFetch(`${BASE}/api/unlink`, {
-    method: 'POST',
-  });
-  if (!res) return null;
-  return res.json();
-}
-
-// --- Agenda (phone contacts) ---
-
-export async function fetchAgenda({ page = 1, limit = 50, search = '', filter = 'all' } = {}) {
-  const params = new URLSearchParams({ page, limit, search, filter });
-  const res = await authFetch(`${BASE}/api/agenda?${params}`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function fetchAgendaStats() {
-  const res = await authFetch(`${BASE}/api/agenda/stats`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function importAgendaVCF(file) {
+export function importAgendaVCF(file) {
   const formData = new FormData();
   formData.append('vcf', file);
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${BASE}/api/agenda/import`, {
-    method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    window.dispatchEvent(new Event('auth-expired'));
-    return null;
-  }
-  return res.json();
+  return request(`${BASE}/api/agenda/import`, { method: 'POST', body: formData });
 }
 
-export async function checkAgendaWhatsApp(countryCode = '') {
-  const res = await authFetch(`${BASE}/api/agenda/check`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ countryCode }),
-  });
-  if (!res) return null;
-  return res.json();
-}
+// --- Mensajes directos ---
 
-// --- Direct messages (to contacts) ---
+export const fetchDirectMessages = () => request(`${BASE}/api/direct-messages`);
+export const createDirectMessage = (formData) =>
+  request(`${BASE}/api/direct-messages`, { method: 'POST', body: formData });
+export const sendDirectMessageNow = (formData) =>
+  request(`${BASE}/api/direct-messages/send-now`, { method: 'POST', body: formData });
+export const cancelDirectMessage = (id) =>
+  request(`${BASE}/api/direct-messages/${id}`, { method: 'DELETE' });
+export const deleteDirectMessageApi = (id) =>
+  request(`${BASE}/api/direct-messages/${id}/permanent`, { method: 'DELETE' });
 
-export async function fetchDirectMessages() {
-  const res = await authFetch(`${BASE}/api/direct-messages`);
-  if (!res) return null;
-  return res.json();
-}
-
-export async function createDirectMessage(formData) {
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${BASE}/api/direct-messages`, {
-    method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    window.dispatchEvent(new Event('auth-expired'));
-    return null;
-  }
-  return res.json();
-}
-
-export async function cancelDirectMessage(id) {
-  const res = await authFetch(`${BASE}/api/direct-messages/${id}`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
-
-export async function sendDirectMessageNow(formData) {
-  const token = localStorage.getItem('token');
-  const res = await fetch(`${BASE}/api/direct-messages/send-now`, {
-    method: 'POST',
-    headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-    body: formData,
-  });
-  if (res.status === 401) {
-    localStorage.removeItem('token');
-    localStorage.removeItem('username');
-    window.dispatchEvent(new Event('auth-expired'));
-    return null;
-  }
-  return res.json();
-}
-
-export async function deleteDirectMessageApi(id) {
-  const res = await authFetch(`${BASE}/api/direct-messages/${id}/permanent`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
-
-export async function resetAgendaChecks() {
-  const res = await authFetch(`${BASE}/api/agenda/reset-checks`, {
-    method: 'POST',
-  });
-  if (!res) return null;
-  return res.json();
-}
-
-export async function deleteAgenda() {
-  const res = await authFetch(`${BASE}/api/agenda`, {
-    method: 'DELETE',
-  });
-  if (!res) return null;
-  return res.json();
-}
+// --- Estados publicados ---
 
 export async function fetchPublishedStatuses() {
   const res = await authFetch(`${BASE}/api/published-statuses`);
@@ -325,10 +170,29 @@ export async function fetchPublishedStatuses() {
   return res.json();
 }
 
-export async function deletePublishedStatusApi(id) {
-  const res = await authFetch(`${BASE}/api/published-statuses/${id}`, {
-    method: 'DELETE',
-  });
+export const deletePublishedStatusApi = (id) =>
+  request(`${BASE}/api/published-statuses/${id}`, { method: 'DELETE' });
+
+// --- Vista previa de enlaces ---
+
+export const fetchLinkPreview = (url) =>
+  request(`${BASE}/api/link-preview?${new URLSearchParams({ url })}`);
+
+/** Descarga (vía el servidor) la imagen de un enlace y la devuelve como File listo para subir. */
+export async function fetchLinkImage(url) {
+  const res = await authFetch(`${BASE}/api/link-preview/image?${new URLSearchParams({ url })}`);
   if (!res) return null;
-  return res.json();
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || 'No se pudo descargar la imagen');
+  }
+  const blob = await res.blob();
+  const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp' }[blob.type] || 'jpg';
+  const base = decodeURIComponent(new URL(url).pathname.split('/').pop() || '').replace(/\.[a-z0-9]+$/i, '').replace(/[^\w-]+/g, '-').slice(0, 40);
+  return new File([blob], `${base || 'imagen-enlace'}.${ext}`, { type: blob.type });
 }
+
+// --- Audiencia de estados ---
+
+export const fetchStatusAudience = (groupIds = []) =>
+  request(`${BASE}/api/status-audience?${new URLSearchParams(groupIds.length ? { groupIds: groupIds.join(',') } : {})}`);

@@ -1,41 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { fetchDirectMessages, cancelDirectMessage, deleteDirectMessageApi } from '../api.js';
-
-const styles = {
-  table: { width: '100%', borderCollapse: 'collapse', fontSize: 13 },
-  th: {
-    textAlign: 'left', padding: '10px 8px', borderBottom: '2px solid #e0e0e0',
-    color: '#555', fontWeight: 600,
-  },
-  td: { padding: '8px', borderBottom: '1px solid #f0f0f0', verticalAlign: 'top' },
-  badge: (status) => {
-    const colors = {
-      pending: { bg: '#FFF3E0', color: '#E65100' },
-      sent: { bg: '#E8F5E9', color: '#2E7D32' },
-      failed: { bg: '#FFEBEE', color: '#C62828' },
-      cancelled: { bg: '#f5f5f5', color: '#999' },
-    };
-    const c = colors[status] || colors.pending;
-    return {
-      display: 'inline-block', padding: '2px 8px', borderRadius: 10,
-      fontSize: 11, fontWeight: 600, color: c.color, backgroundColor: c.bg,
-    };
-  },
-  btnSmall: (color, bg) => ({
-    padding: '4px 10px', fontSize: 12, fontWeight: 600, color,
-    backgroundColor: bg, border: 'none', borderRadius: 4, cursor: 'pointer', marginRight: 4,
-  }),
-  empty: { color: '#999', textAlign: 'center', padding: 16, fontSize: 13 },
-};
-
-const statusLabels = { pending: 'Pendiente', sent: 'Enviado', failed: 'Fallido', cancelled: 'Cancelado' };
+import { Icon, Button, Empty, StatusBadge, formatDate, toast, confirmDialog } from './ui.jsx';
 
 export default function DirectMessageList() {
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState(null);
 
   const load = useCallback(async () => {
     const data = await fetchDirectMessages();
-    setMessages(data);
+    if (data) setMessages(data);
   }, []);
 
   useEffect(() => {
@@ -45,64 +17,76 @@ export default function DirectMessageList() {
   }, [load]);
 
   const handleCancel = async (id) => {
-    if (!window.confirm('Cancelar este mensaje?')) return;
+    if (!(await confirmDialog({ title: '¿Cancelar este mensaje?', message: 'No se enviará a los destinatarios.', confirmLabel: 'Cancelar envío', danger: true }))) return;
     await cancelDirectMessage(id);
+    toast.info('Envío cancelado');
     load();
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Eliminar permanentemente?')) return;
+    if (!(await confirmDialog({ title: '¿Eliminar este mensaje?', message: 'Se borrará de forma permanente.', confirmLabel: 'Eliminar', danger: true }))) return;
     await deleteDirectMessageApi(id);
+    toast.success('Mensaje eliminado');
     load();
   };
 
-  if (messages.length === 0) {
-    return <p style={styles.empty}>No hay mensajes directos programados</p>;
+  if (messages === null) {
+    return <div className="stack">{[0, 1, 2].map((i) => <div key={i} className="skeleton" style={{ height: 44 }} />)}</div>;
   }
 
+  if (messages.length === 0) {
+    return (
+      <Empty icon="send" title="No hay mensajes directos programados">
+        Cuando programes un mensaje a contactos o números, lo verás aquí.
+      </Empty>
+    );
+  }
+
+  const action = (m) =>
+    m.status === 'pending' ? (
+      <Button size="sm" variant="ghost" icon="ban" onClick={() => handleCancel(m.id)}>Cancelar</Button>
+    ) : (
+      <Button size="sm" variant="ghost" className="btn-icon" aria-label="Eliminar" title="Eliminar" onClick={() => handleDelete(m.id)}>
+        <Icon name="trash" size="sm" />
+      </Button>
+    );
+
   return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th style={styles.th}>Destinatarios</th>
-            <th style={styles.th}>Mensaje</th>
-            <th style={styles.th}>Programado</th>
-            <th style={styles.th}>Estado</th>
-            <th style={styles.th}>Acciones</th>
-          </tr>
-        </thead>
-        <tbody>
-          {messages.map((m) => (
-            <tr key={m.id}>
-              <td style={styles.td}>{m.recipient_label}</td>
-              <td style={{ ...styles.td, maxWidth: 250, wordBreak: 'break-word' }}>
-                {m.content?.substring(0, 100)}{m.content?.length > 100 ? '...' : ''}
-              </td>
-              <td style={styles.td}>
-                {new Date(m.scheduled_at).toLocaleString()}
-              </td>
-              <td style={styles.td}>
-                <span style={styles.badge(m.status)}>
-                  {statusLabels[m.status] || m.status}
-                </span>
-              </td>
-              <td style={styles.td}>
-                {m.status === 'pending' && (
-                  <button style={styles.btnSmall('#fff', '#EF5350')} onClick={() => handleCancel(m.id)}>
-                    Cancelar
-                  </button>
-                )}
-                {m.status !== 'pending' && (
-                  <button style={styles.btnSmall('#fff', '#999')} onClick={() => handleDelete(m.id)}>
-                    Eliminar
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="table-wrap responsive">
+        <table className="table">
+          <thead>
+            <tr><th>Destinatarios</th><th>Mensaje</th><th>Programado</th><th>Estado</th><th aria-label="Acciones" /></tr>
+          </thead>
+          <tbody>
+            {messages.map((m) => (
+              <tr key={m.id}>
+                <td><b>{m.recipient_label}</b></td>
+                <td className="cell-clip" title={m.content}>{m.content}</td>
+                <td className="nowrap">{formatDate(m.scheduled_at)}</td>
+                <td><StatusBadge status={m.status} /></td>
+                <td><div className="cell-actions">{action(m)}</div></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="items">
+        {messages.map((m) => (
+          <article className="item" key={m.id}>
+            <div className="item-top">
+              <span className="item-title">{m.recipient_label}</span>
+              <StatusBadge status={m.status} />
+            </div>
+            <p className="item-text">{m.content}</p>
+            <div className="item-meta">
+              <span><Icon name="clock" size="sm" className="inline-icon" /> {formatDate(m.scheduled_at)}</span>
+              {action(m)}
+            </div>
+          </article>
+        ))}
+      </div>
+    </>
   );
 }

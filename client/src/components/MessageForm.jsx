@@ -1,75 +1,28 @@
 import React, { useState } from 'react';
 import ImageUpload from './ImageUpload.jsx';
+import { useLinkTools, LinkPanel, BubbleLinkCard } from './LinkTools.jsx';
 import { createMessage } from '../api.js';
+import { Button, Field, Alert, ScheduleField, WaPreview, toast } from './ui.jsx';
 
-const styles = {
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 4,
-  },
-  label: {
-    fontSize: 14,
-    fontWeight: 500,
-    marginBottom: 4,
-    color: '#333',
-  },
-  textarea: {
-    width: '100%',
-    minHeight: 100,
-    padding: 10,
-    fontSize: 15,
-    border: '1px solid #ccc',
-    borderRadius: 6,
-    resize: 'vertical',
-    fontFamily: 'inherit',
-    marginBottom: 12,
-    boxSizing: 'border-box',
-  },
-  dateInput: {
-    padding: '10px 12px',
-    fontSize: 15,
-    border: '1px solid #ccc',
-    borderRadius: 6,
-    marginBottom: 16,
-    width: '100%',
-    boxSizing: 'border-box',
-  },
-  submitBtn: {
-    padding: '12px 24px',
-    fontSize: 16,
-    fontWeight: 600,
-    color: '#fff',
-    backgroundColor: '#25D366',
-    border: 'none',
-    borderRadius: 6,
-    cursor: 'pointer',
-  },
-  submitBtnDisabled: {
-    opacity: 0.6,
-    cursor: 'not-allowed',
-  },
-  feedback: {
-    marginTop: 12,
-    padding: 10,
-    borderRadius: 6,
-    fontSize: 14,
-  },
-};
+const MAX = 4096;
 
 export default function MessageForm({ group, onCreated }) {
   const [content, setContent] = useState('');
   const [scheduledAt, setScheduledAt] = useState('');
   const [image, setImage] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [feedback, setFeedback] = useState(null);
+  const [error, setError] = useState(null);
+
+  const link = useLinkTools({ text: content, setText: setContent, addImage: setImage, removeImage: (f) => setImage((cur) => (cur === f ? null : cur)) });
+
+  const isValid = content.trim() && scheduledAt;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!content.trim() || !scheduledAt) return;
+    if (!isValid) return;
 
     setLoading(true);
-    setFeedback(null);
+    setError(null);
 
     const formData = new FormData();
     formData.append('groupId', group.id);
@@ -80,66 +33,46 @@ export default function MessageForm({ group, onCreated }) {
 
     try {
       const result = await createMessage(formData);
+      if (!result) return;
       if (result.error) {
-        setFeedback({ type: 'error', text: result.error });
+        setError(result.error);
       } else {
-        setFeedback({ type: 'success', text: 'Mensaje programado correctamente' });
+        toast.success(`Mensaje programado para “${group.name}”`);
         setContent('');
         setScheduledAt('');
         setImage(null);
         onCreated();
       }
     } catch {
-      setFeedback({ type: 'error', text: 'Error al programar el mensaje' });
+      setError('No se pudo programar el mensaje. Inténtalo de nuevo.');
     } finally {
       setLoading(false);
     }
   };
 
-  const isValid = content.trim() && scheduledAt;
-
   return (
-    <form onSubmit={handleSubmit} style={styles.form}>
-      <label style={styles.label}>Mensaje</label>
-      <textarea
-        style={styles.textarea}
-        value={content}
-        onChange={(e) => setContent(e.target.value)}
-        placeholder="Escribe tu mensaje..."
-      />
-
-      <ImageUpload file={image} onFileChange={setImage} />
-
-      <label style={styles.label}>Fecha y hora de envio</label>
-      <input
-        type="datetime-local"
-        style={styles.dateInput}
-        value={scheduledAt}
-        onChange={(e) => setScheduledAt(e.target.value)}
-      />
-
-      <button
-        type="submit"
-        disabled={!isValid || loading}
-        style={{
-          ...styles.submitBtn,
-          ...(!isValid || loading ? styles.submitBtnDisabled : {}),
-        }}
-      >
-        {loading ? 'Programando...' : 'Programar mensaje'}
-      </button>
-
-      {feedback && (
-        <div
-          style={{
-            ...styles.feedback,
-            background: feedback.type === 'success' ? '#E8F5E9' : '#FFEBEE',
-            color: feedback.type === 'success' ? '#2E7D32' : '#C62828',
-          }}
-        >
-          {feedback.text}
+    <form onSubmit={handleSubmit} className="compose-grid">
+      <div className="stack">
+        <Field label="Mensaje" htmlFor="msg-content" extra={`${content.length}/${MAX}`}>
+          <textarea
+            id="msg-content" onPaste={link.onPaste} className="textarea" value={content} maxLength={MAX}
+            onChange={(e) => setContent(e.target.value)} placeholder="Escribe tu mensaje…"
+          />
+        </Field>
+        <LinkPanel tools={link} setText={setContent} addImage={setImage} />
+        <ImageUpload file={image} onFileChange={setImage} />
+        <ScheduleField value={scheduledAt} onChange={setScheduledAt} />
+        {error && <Alert type="error">{error}</Alert>}
+        <div className="row">
+          <Button type="submit" variant="primary" size="lg" icon="clock" loading={loading} disabled={!isValid}>
+            {loading ? 'Programando…' : 'Programar mensaje'}
+          </Button>
+          {!isValid && <span className="field-hint">Escribe el mensaje y elige cuándo enviarlo.</span>}
         </div>
-      )}
+      </div>
+      <aside className="compose-aside">
+        <WaPreview text={content} imageFile={image} when={scheduledAt} linkCard={<BubbleLinkCard preview={link.preview} />} />
+      </aside>
     </form>
   );
 }

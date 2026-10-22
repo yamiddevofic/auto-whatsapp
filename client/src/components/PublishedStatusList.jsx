@@ -1,103 +1,44 @@
 import React from 'react';
 import { deletePublishedStatusApi } from '../api.js';
-
-const styles = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 12,
-  },
-  item: {
-    background: '#fff',
-    border: '1px solid #e0e0e0',
-    borderRadius: 8,
-    padding: 16,
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  content: {
-    flex: 1,
-  },
-  text: {
-    margin: 0,
-    fontSize: 14,
-    color: '#333',
-    whiteSpace: 'pre-wrap',
-  },
-  image: {
-    width: 80,
-    height: 80,
-    objectFit: 'cover',
-    borderRadius: 4,
-    marginRight: 12,
-  },
-  imageContainer: {
-    display: 'flex',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  info: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  deleteButton: {
-    padding: '6px 12px',
-    backgroundColor: '#dc3545',
-    color: 'white',
-    border: 'none',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 13,
-  },
-  empty: {
-    textAlign: 'center',
-    padding: 40,
-    color: '#999',
-  },
-};
+import { Icon, Button, Empty, toast, confirmDialog, formatDate } from './ui.jsx';
 
 export default function PublishedStatusList({ statuses, onDelete }) {
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar este estado publicado?')) return;
-    
+    if (!(await confirmDialog({ title: '¿Eliminar este estado publicado?', message: 'Se retirará de tu historial.', confirmLabel: 'Eliminar', danger: true }))) return;
     await deletePublishedStatusApi(id);
+    toast.success('Estado eliminado');
     if (onDelete) onDelete();
   };
 
   if (statuses.length === 0) {
-    return <div style={styles.empty}>No hay estados publicados</div>;
+    return (
+      <Empty icon="status" title="Todavía no has publicado estados">
+        Los estados que publiques aparecerán aquí.
+      </Empty>
+    );
   }
 
   return (
-    <div style={styles.container}>
+    <div className="status-grid">
       {statuses.map((status) => (
-        <div key={status.id} style={styles.item}>
-          <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
-            {status.image_path && (
-              <div style={styles.imageContainer}>
-                <img
-                  src={`/uploads/${status.image_path.split('/').pop()}`}
-                  alt="Status"
-                  style={styles.image}
-                />
-              </div>
+        <article key={status.id} className="status-card">
+          <div className="status-media">
+            {status.image_path ? (
+              <img src={`/uploads/${status.image_path.split('/').pop()}`} alt="Imagen del estado" loading="lazy" />
+            ) : (
+              <span>{status.content}</span>
             )}
-            <div style={styles.content}>
-              {status.content && <p style={styles.text}>{status.content}</p>}
-              <div style={styles.info}>
-                Publicado: {new Date(status.published_at).toLocaleString('es-ES')}
-              </div>
+          </div>
+          <div className="status-body">
+            {status.image_path && status.content && <p>{status.content}</p>}
+            <div className="status-foot">
+              <span><Icon name="clock" size="sm" className="inline-icon" /> {formatDate(status.published_at)}</span>
+              <Button size="sm" variant="ghost" className="btn-icon" aria-label="Eliminar estado" title="Eliminar" onClick={() => handleDelete(status.id)}>
+                <Icon name="trash" size="sm" />
+              </Button>
             </div>
           </div>
-          <button
-            style={styles.deleteButton}
-            onClick={() => handleDelete(status.id)}
-          >
-            Eliminar
-          </button>
-        </div>
+        </article>
       ))}
     </div>
   );

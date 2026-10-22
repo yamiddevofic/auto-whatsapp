@@ -2,9 +2,16 @@ import schedule from 'node-schedule';
 import { getPendingMessages, updateMessageStatus, getMessageById, getPendingStatusUpdates, updateStatusUpdateStatus, getStatusUpdateById, getPendingDirectMessages, updateDirectMessageStatus, getDirectMessageById, incrementMessageCount, getDailyLimit, canSendMoreMessages, getTodayMessageStats, getAllMessages, getAllStatusUpdates, getAllDirectMessages } from './db.js';
 import { getAllContacts } from './contacts.js';
 import { sendMessage, sendStatusUpdate } from './whatsapp.js';
-import { io } from './index.js';
+import { emit } from './realtime.js';
+import { logger, maskJid } from './logger.js';
 
 const activeJobs = new Map();
+
+/** Retardo aleatorio de 3-15 s entre mensajes, para no disparar la detección antispam. */
+export function randomSendDelay() {
+  return Math.floor(Math.random() * 12000) + 3000;
+}
+
 const activeStatusJobs = new Map();
 const activeDirectJobs = new Map();
 
@@ -40,26 +47,26 @@ export function scheduleMessage(row) {
   if (date <= new Date()) {
     const minutesLate = Math.round((Date.now() - date.getTime()) / 60000);
     if (minutesLate <= 10) {
-      console.log(`[Scheduler] Message ${row.id} is ${minutesLate}m late, sending now`);
+      logger.info({ id: row.id, minutesLate }, 'Mensaje atrasado: se envía ahora');
       (async () => {
         try {
           const msg = getMessageById(row.id);
           if (!msg || msg.status !== 'pending') return;
           await sendMessage(msg.group_id, msg.content, msg.image_path);
           updateMessageStatus(row.id, 'sent');
-          io.emit('messages:updated', getAllMessages());
-          console.log(`[Scheduler] Late message ${row.id} sent successfully`);
+          emit('messages:updated', getAllMessages());
+          logger.info({ id: row.id }, 'Mensaje atrasado enviado');
         } catch (err) {
-          console.error(`[Scheduler] Late message ${row.id} failed:`, err.message);
+          logger.error({ id: row.id, err: err.message }, 'El mensaje atrasado falló');
           updateMessageStatus(row.id, 'failed', err.message);
-          io.emit('messages:updated', getAllMessages());
+          emit('messages:updated', getAllMessages());
         }
       })();
       return;
     }
-    console.log(`[Scheduler] Message ${row.id} is ${minutesLate}m in the past, marking as failed`);
+    logger.warn({ id: row.id, minutesLate }, 'Mensaje demasiado antiguo: marcado como fallido');
     updateMessageStatus(row.id, 'failed', 'Scheduled time already passed');
-    io.emit('messages:updated', getAllMessages());
+    emit('messages:updated', getAllMessages());
     return;
   }
 
@@ -71,15 +78,15 @@ export function scheduleMessage(row) {
     }
 
     try {
-      console.log(`[Scheduler] Sending message ${row.id} to ${msg.group_name}`);
+      logger.info({ id: row.id }, 'Enviando mensaje programado al grupo');
       await sendMessage(msg.group_id, msg.content, msg.image_path);
       updateMessageStatus(row.id, 'sent');
-      io.emit('messages:updated', getAllMessages());
-      console.log(`[Scheduler] Message ${row.id} sent successfully`);
+      emit('messages:updated', getAllMessages());
+      logger.info({ id: row.id }, 'Mensaje enviado');
     } catch (err) {
-      console.error(`[Scheduler] Message ${row.id} failed:`, err.message);
+      logger.error({ id: row.id, err: err.message }, 'El mensaje falló');
       updateMessageStatus(row.id, 'failed', err.message);
-      io.emit('messages:updated', getAllMessages());
+      emit('messages:updated', getAllMessages());
     } finally {
       activeJobs.delete(row.id);
     }
@@ -98,32 +105,36 @@ export function cancelScheduledMessage(id) {
   }
 }
 
+function parseAudience(raw) {
+  try { return raw ? JSON.parse(raw) : { mode: 'all' }; } catch { return { mode: 'all' }; }
+}
+
 export function scheduleStatusUpdateJob(row) {
   const date = new Date(row.scheduled_at);
 
   if (date <= new Date()) {
     const minutesLate = Math.round((Date.now() - date.getTime()) / 60000);
     if (minutesLate <= 10) {
-      console.log(`[Scheduler] Status ${row.id} is ${minutesLate}m late, sending now`);
+      logger.info({ id: row.id, minutesLate }, 'Estado atrasado: se publica ahora');
       (async () => {
         try {
           const su = getStatusUpdateById(row.id);
           if (!su || su.status !== 'pending') return;
-          await sendStatusUpdate(su.content, su.image_path);
+          await sendStatusUpdate(su.content, su.image_path, parseAudience(su.audience));
           updateStatusUpdateStatus(row.id, 'sent');
-          io.emit('status-updates:updated', getAllStatusUpdates());
-          console.log(`[Scheduler] Late status ${row.id} sent successfully`);
+          emit('status-updates:updated', getAllStatusUpdates());
+          logger.info({ id: row.id }, 'Estado atrasado publicado');
         } catch (err) {
-          console.error(`[Scheduler] Late status ${row.id} failed:`, err.message);
+          logger.error({ id: row.id, err: err.message }, 'El estado atrasado falló');
           updateStatusUpdateStatus(row.id, 'failed', err.message);
-          io.emit('status-updates:updated', getAllStatusUpdates());
+          emit('status-updates:updated', getAllStatusUpdates());
         }
       })();
       return;
     }
-    console.log(`[Scheduler] Status ${row.id} is ${minutesLate}m in the past, marking as failed`);
+    logger.warn({ id: row.id, minutesLate }, 'Estado demasiado antiguo: marcado como fallido');
     updateStatusUpdateStatus(row.id, 'failed', 'Scheduled time already passed');
-    io.emit('status-updates:updated', getAllStatusUpdates());
+    emit('status-updates:updated', getAllStatusUpdates());
     return;
   }
 
@@ -135,15 +146,15 @@ export function scheduleStatusUpdateJob(row) {
     }
 
     try {
-      console.log(`[Scheduler] Posting status update ${row.id}`);
-      await sendStatusUpdate(su.content, su.image_path);
+      logger.info({ id: row.id }, 'Publicando estado programado');
+      await sendStatusUpdate(su.content, su.image_path, parseAudience(su.audience));
       updateStatusUpdateStatus(row.id, 'sent');
-      io.emit('status-updates:updated', getAllStatusUpdates());
-      console.log(`[Scheduler] Status ${row.id} posted successfully`);
+      emit('status-updates:updated', getAllStatusUpdates());
+      logger.info({ id: row.id }, 'Estado publicado');
     } catch (err) {
-      console.error(`[Scheduler] Status ${row.id} failed:`, err.message);
+      logger.error({ id: row.id, err: err.message }, 'El estado falló');
       updateStatusUpdateStatus(row.id, 'failed', err.message);
-      io.emit('status-updates:updated', getAllStatusUpdates());
+      emit('status-updates:updated', getAllStatusUpdates());
     } finally {
       activeStatusJobs.delete(row.id);
     }
@@ -169,22 +180,21 @@ export function scheduleDirectMessage(row) {
   const recipients = JSON.parse(row.recipients);
 
   const sendToAll = async () => {
-    console.log(`[Scheduler] sendToAll() called with ${recipients.length} recipients`);
+    logger.debug({ destinatarios: recipients.length }, 'Iniciando envío a destinatarios');
     let sent = 0;
-    let errors = [];
+    const errors = [];
     try {
       const dailyLimit = getDailyLimit();
       const currentStats = getTodayMessageStats();
-      console.log(`[Scheduler] Daily limit check: ${dailyLimit}, sent: ${currentStats.messages_sent}`);
       const contacts = getAllContacts();
-      console.log(`[Scheduler] Loaded ${contacts.length} contacts`);
+      logger.debug({ contactos: contacts.length }, 'Contactos cargados para personalizar');
       const contactMap = new Map(contacts.map(c => [c.jid, c]));
-      console.log(`[Scheduler] Daily message limit: ${dailyLimit}, Already sent: ${currentStats.messages_sent}`);
+      logger.info({ limite: dailyLimit, enviadosHoy: currentStats.messages_sent }, 'Límite diario');
 
       for (const jid of recipients) {
         // Check daily limit before each message
         if (!canSendMoreMessages(1)) {
-          console.log(`[Scheduler] Daily limit reached (${dailyLimit}). Stopping message sending.`);
+          logger.warn({ limite: dailyLimit }, 'Límite diario alcanzado: se detiene el envío');
           break;
         }
 
@@ -194,25 +204,23 @@ export function scheduleDirectMessage(row) {
           const contactName = contact?.name || contact?.notify || contact?.agenda_name || null;
           const variedContent = varyMessageContent(row.content, contactName);
           
-          console.log(`[Scheduler] Sending to ${jid} (${contactName || 'unknown'}): ${variedContent?.substring(0, 50)}...`);
+          logger.info({ jid: maskJid(jid) }, 'Enviando mensaje directo');
           await sendMessage(jid, variedContent, row.image_path);
-          console.log(`[Scheduler] Successfully sent to ${jid}`);
+          logger.debug({ jid: maskJid(jid) }, 'Enviado');
           incrementMessageCount();
           sent++;
-          // Random delay between messages (3-15 seconds) to avoid bot detection
+          // Retardo aleatorio entre mensajes para no disparar la detección antispam
           if (sent < recipients.length) {
-            const delay = Math.floor(Math.random() * 12000) + 3000; // 3000-15000ms
-            console.log(`[Scheduler] Waiting ${delay / 1000}s before next message`);
-            await new Promise(resolve => setTimeout(resolve, delay));
+            await new Promise((resolve) => setTimeout(resolve, randomSendDelay()));
           }
         } catch (err) {
-          console.error(`[Scheduler] Failed to send to ${jid}:`, err.message);
+          logger.error({ jid: maskJid(jid), err: err.message }, 'Fallo al enviar');
           errors.push(`${jid}: ${err.message}`);
         }
       }
       return { sent, errors };
     } catch (err) {
-      console.error(`[Scheduler] Error in sendToAll():`, err.message);
+      logger.error({ err: err.message }, 'Error durante el envío masivo');
       return { sent, errors: [err.message] };
     }
   };
@@ -220,7 +228,7 @@ export function scheduleDirectMessage(row) {
   if (date <= new Date()) {
     const minutesLate = Math.round((Date.now() - date.getTime()) / 60000);
     if (minutesLate <= 10) {
-      console.log(`[Scheduler] Direct message ${row.id} is ${minutesLate}m late, sending now`);
+      logger.info({ id: row.id, minutesLate }, 'Mensaje directo atrasado: se envía ahora');
       (async () => {
         try {
           const msg = getDirectMessageById(row.id);
@@ -231,17 +239,17 @@ export function scheduleDirectMessage(row) {
           } else {
             updateDirectMessageStatus(row.id, 'sent');
           }
-          io.emit('direct-messages:updated', getAllDirectMessages());
-          console.log(`[Scheduler] Direct message ${row.id}: ${sent}/${recipients.length} sent`);
+          emit('direct-messages:updated', getAllDirectMessages());
+          logger.info({ id: row.id, enviados: sent, total: recipients.length }, 'Mensaje directo procesado');
         } catch (err) {
           updateDirectMessageStatus(row.id, 'failed', err.message);
-          io.emit('direct-messages:updated', getAllDirectMessages());
+          emit('direct-messages:updated', getAllDirectMessages());
         }
       })();
       return;
     }
     updateDirectMessageStatus(row.id, 'failed', 'Scheduled time already passed');
-    io.emit('direct-messages:updated', getAllDirectMessages());
+    emit('direct-messages:updated', getAllDirectMessages());
     return;
   }
 
@@ -253,18 +261,18 @@ export function scheduleDirectMessage(row) {
     }
 
     try {
-      console.log(`[Scheduler] Sending direct message ${row.id} to ${recipients.length} contacts`);
+      logger.info({ id: row.id, total: recipients.length }, 'Enviando mensaje directo programado');
       const { sent, errors } = await sendToAll();
       if (errors.length > 0) {
         updateDirectMessageStatus(row.id, sent > 0 ? 'sent' : 'failed', errors.join('; '));
       } else {
         updateDirectMessageStatus(row.id, 'sent');
       }
-      io.emit('direct-messages:updated', getAllDirectMessages());
-      console.log(`[Scheduler] Direct message ${row.id}: ${sent}/${recipients.length} sent`);
+      emit('direct-messages:updated', getAllDirectMessages());
+      logger.info({ id: row.id, enviados: sent, total: recipients.length }, 'Mensaje directo procesado');
     } catch (err) {
       updateDirectMessageStatus(row.id, 'failed', err.message);
-      io.emit('direct-messages:updated', getAllDirectMessages());
+      emit('direct-messages:updated', getAllDirectMessages());
     } finally {
       activeDirectJobs.delete(row.id);
     }
@@ -285,19 +293,19 @@ export function cancelScheduledDirectMessage(id) {
 
 export function loadPendingMessages() {
   const pending = getPendingMessages();
-  console.log(`[Scheduler] Loading ${pending.length} pending messages`);
+  logger.info({ total: pending.length }, 'Reprogramando mensajes pendientes');
   for (const msg of pending) {
     scheduleMessage(msg);
   }
 
   const pendingStatuses = getPendingStatusUpdates();
-  console.log(`[Scheduler] Loading ${pendingStatuses.length} pending status updates`);
+  logger.info({ total: pendingStatuses.length }, 'Reprogramando estados pendientes');
   for (const su of pendingStatuses) {
     scheduleStatusUpdateJob(su);
   }
 
   const pendingDirect = getPendingDirectMessages();
-  console.log(`[Scheduler] Loading ${pendingDirect.length} pending direct messages`);
+  logger.info({ total: pendingDirect.length }, 'Reprogramando mensajes directos pendientes');
   for (const dm of pendingDirect) {
     scheduleDirectMessage(dm);
   }

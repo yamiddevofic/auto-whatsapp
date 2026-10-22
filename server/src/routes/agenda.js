@@ -1,135 +1,113 @@
 import { Router } from 'express';
 import {
-  importAgendaContacts,
-  getAllAgendaContacts,
-  getAgendaCount,
-  getAgendaWhatsAppCount,
-  getUncheckedAgendaContacts,
-  markAgendaWhatsApp,
-  markAgendaNotWhatsApp,
-  resetAgendaChecks,
-  deleteAllAgendaContacts,
-  parseVCF,
+  importAgendaContacts, findAgendaContacts, getAgendaCount, getAgendaWhatsAppCount,
+  getUncheckedAgendaContacts, markAgendaWhatsApp, markAgendaNotWhatsApp, resetAgendaChecks,
+  deleteAllAgendaContacts, parseVCF,
 } from '../agenda.js';
-import { checkOnWhatsApp } from '../whatsapp.js';
+import { checkOnWhatsApp, isConnected } from '../whatsapp.js';
+import { requireReauth } from '../auth.js';
+import config from '../config.js';
+import { logger } from '../logger.js';
+import { validate, validateQuery } from '../middleware/validate.js';
+import { agendaCheckSchema, paginationSchema } from '../schemas.js';
+import { httpError, asyncRoute } from '../middleware/error-handler.js';
 
 const router = Router();
 
-router.get('/api/agenda', (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1);
-  const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 50));
-  const search = (req.query.search || '').toLowerCase().trim();
-  const filter = req.query.filter || 'all'; // all | whatsapp | not_whatsapp | unchecked
+// Lote reducido: verificar muchos números seguidos es un patrón que WhatsApp detecta.
+const CHECK_BATCH_SIZE = 15;
 
-  let contacts = getAllAgendaContacts();
+router.get('/api/agenda', validateQuery(paginationSchema), (req, res) => {
+  const { page, limit, search, filter } = req.validatedQuery;
 
-  if (filter === 'whatsapp') contacts = contacts.filter((c) => c.on_whatsapp === 1);
-  else if (filter === 'not_whatsapp') contacts = contacts.filter((c) => c.on_whatsapp === 0 && c.checked_at);
-  else if (filter === 'unchecked') contacts = contacts.filter((c) => !c.checked_at);
-
-  if (search) {
-    contacts = contacts.filter((c) =>
-      c.name.toLowerCase().includes(search) ||
-      c.phone.includes(search)
-    );
-  }
-
-  const total = contacts.length;
-  const totalPages = Math.ceil(total / limit);
-  const offset = (page - 1) * limit;
-  const items = contacts.slice(offset, offset + limit);
-
-  res.json({ items, total, page, totalPages, limit });
+  const { items, total } = findAgendaContacts({ search, filter, limit, offset: (page - 1) * limit });
+  res.json({ items, total, page, totalPages: Math.ceil(total / limit), limit });
 });
 
 router.get('/api/agenda/stats', (req, res) => {
-  res.json({
-    total: getAgendaCount(),
-    onWhatsApp: getAgendaWhatsAppCount(),
-  });
+  res.json({ total: getAgendaCount(), onWhatsApp: getAgendaWhatsAppCount() });
 });
 
-// Upload VCF file
-router.post('/api/agenda/import', (req, res) => {
+router.post('/api/agenda/import', (req, res, next) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No se envio ningun archivo' });
-    }
+    if (!req.file) throw httpError(400, 'No se envió ningún archivo .vcf válido');
 
-    const vcfText = req.file.buffer.toString('utf-8');
-    const contacts = parseVCF(vcfText);
+    const contacts = parseVCF(req.file.buffer.toString('utf-8'));
 
     if (contacts.length === 0) {
-      return res.status(400).json({ error: 'No se encontraron contactos en el archivo VCF' });
+      throw httpError(400, 'No se encontraron contactos en el archivo VCF');
+    }
+    if (contacts.length > config.limits.maxVcfContacts) {
+      throw httpError(413, `El archivo contiene demasiados contactos (máximo ${config.limits.maxVcfContacts})`);
     }
 
-    const userId = req.user?.username || 'default';
-    const count = importAgendaContacts(contacts, userId);
-    res.json({ success: true, imported: count });
+    const imported = importAgendaContacts(contacts);
+    logger.info({ imported, user: req.user?.username }, 'Agenda importada');
+    res.json({ success: true, imported });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-// Normalize phone number with country code
+/** Añade el código de país a un número que no lo trae. */
 function normalizePhone(phone, countryCode) {
-  // Already has + prefix — assume it's complete
   if (phone.startsWith('+')) return phone;
-  // Already starts with country code digits
-  if (countryCode && phone.startsWith(countryCode)) return '+' + phone;
-  // Prepend country code
-  if (countryCode) return '+' + countryCode + phone;
+  if (countryCode && phone.startsWith(countryCode)) return `+${phone}`;
+  if (countryCode) return `+${countryCode}${phone}`;
   return phone;
 }
 
-// Check which contacts are on WhatsApp (in batches)
-router.post('/api/agenda/check', async (req, res) => {
-  try {
-    const countryCode = (req.body.countryCode || '').replace(/\D/g, '');
-    const unchecked = getUncheckedAgendaContacts(50);
+router.post('/api/agenda/check', validate(agendaCheckSchema), asyncRoute(async (req, res) => {
+  const { countryCode } = req.body;
+  // Sin conexión, cada consulta fallaría y los contactos quedarían marcados como
+  // "sin WhatsApp" por error
+  if (!isConnected()) throw httpError(503, 'WhatsApp no está conectado');
 
-    if (unchecked.length === 0) {
-      return res.json({ success: true, checked: 0, message: 'Todos los contactos ya fueron verificados' });
-    }
+  const unchecked = getUncheckedAgendaContacts(CHECK_BATCH_SIZE);
 
-    let found = 0;
-    for (const contact of unchecked) {
-      try {
-        // Try the original number first
-        let result = await checkOnWhatsApp(contact.phone);
+  if (unchecked.length === 0) {
+    return res.json({ success: true, checked: 0, message: 'Todos los contactos ya fueron verificados' });
+  }
 
-        // If not found and we have a country code, try with it
-        if (!result && countryCode) {
-          const normalized = normalizePhone(contact.phone, countryCode);
-          if (normalized !== contact.phone) {
-            result = await checkOnWhatsApp(normalized);
-          }
-        }
+  let found = 0;
+  for (const contact of unchecked) {
+    try {
+      let result = await checkOnWhatsApp(contact.phone);
 
-        if (result) {
-          markAgendaWhatsApp(contact.phone, result);
-          found++;
-        } else {
-          markAgendaNotWhatsApp(contact.phone);
-        }
-      } catch {
+      if (!result && countryCode) {
+        const normalized = normalizePhone(contact.phone, countryCode);
+        if (normalized !== contact.phone) result = await checkOnWhatsApp(normalized);
+      }
+
+      if (result) {
+        markAgendaWhatsApp(contact.phone, result);
+        found++;
+      } else {
         markAgendaNotWhatsApp(contact.phone);
       }
+    } catch (err) {
+      if (!isConnected()) throw err; // la conexión cayó a mitad del lote: no marcar nada más
+      logger.debug({ err: err.message }, 'Verificación de contacto fallida');
+      markAgendaNotWhatsApp(contact.phone);
     }
-
-    const remaining = getUncheckedAgendaContacts(1).length;
-    res.json({ success: true, checked: unchecked.length, found, remaining: remaining > 0 });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
   }
-});
 
-router.post('/api/agenda/reset-checks', (req, res) => {
+  res.json({
+    success: true,
+    checked: unchecked.length,
+    found,
+    remaining: getUncheckedAgendaContacts(1).length > 0,
+  });
+}));
+
+router.post('/api/agenda/reset-checks', requireReauth, (req, res) => {
+  logger.warn({ user: req.user?.username }, 'Reinicio de verificaciones de agenda');
   resetAgendaChecks();
   res.json({ success: true });
 });
 
-router.delete('/api/agenda', (req, res) => {
+router.delete('/api/agenda', requireReauth, (req, res) => {
+  logger.warn({ user: req.user?.username, ip: req.ip }, 'Borrado masivo de la agenda');
   deleteAllAgendaContacts();
   res.json({ success: true });
 });

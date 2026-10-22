@@ -53,15 +53,43 @@ Plataforma de automatización de WhatsApp con interfaz web. Programa mensajes a 
 git clone git@github.com:yamiddevofic/auto-whatsapp.git
 cd auto-whatsapp
 
-# Instalar dependencias del servidor
-npm install
+# Dependencias del servidor
+cd server && npm install && cd ..
 
-# Instalar dependencias del cliente y compilar
-cd client
-npm install
-npm run build
-cd ..
+# Dependencias del cliente
+cd client && npm install && cd ..
 ```
+
+## Configuración (obligatoria)
+
+El servidor **no arranca sin un archivo `.env`**: no existen credenciales ni secretos por
+defecto en el código.
+
+```bash
+cp .env.example .env
+
+# 1. Secreto de firma de los tokens de sesión (mínimo 32 caracteres)
+openssl rand -base64 48
+
+# 2. Hash bcrypt de tu contraseña
+cd server && npm run hash-password -- 'TuContraseñaSegura' && cd ..
+```
+
+Completa en `.env`:
+
+| Variable | Descripción |
+|---|---|
+| `AUTH_USERNAME` | Usuario de acceso a la interfaz |
+| `AUTH_PASSWORD_HASH` | Hash bcrypt generado arriba (nunca la contraseña en claro) |
+| `AUTH_SECRET` | Secreto aleatorio de firma del JWT |
+| `DATA_DIR` | Directorio de datos (sesión de WhatsApp, base de datos, adjuntos) |
+| `BIND_ADDR` | Interfaz de escucha; `127.0.0.1` por defecto |
+| `BEHIND_TLS` | `true` sólo si un proxy sirve la app por HTTPS |
+| `ALLOWED_ORIGIN` | Orígenes CORS permitidos; vacío = sólo mismo origen |
+| `RETENTION_DAYS` | Días de conservación del historial enviado |
+
+> `.env`, `.credenciales-local.txt` y el directorio de datos están en `.gitignore`.
+> Nunca los subas al repositorio.
 
 ## Uso
 
@@ -69,17 +97,42 @@ cd ..
 bash start.sh
 ```
 
-El servidor se ejecuta en `http://localhost:3001` dentro de una sesión tmux llamada `auto-whatsapp`.
+Compila el frontend y levanta el servidor en `http://127.0.0.1:3001` dentro de una sesión
+tmux llamada `auto-whatsapp`.
 
-1. Abre `http://localhost:3001` en tu navegador
+1. Abre `http://127.0.0.1:3001` e inicia sesión con tus credenciales
 2. Escanea el código QR con WhatsApp desde tu teléfono
-3. Listo — los grupos se cargan automáticamente al conectar
-
-Para ver los logs del servidor:
+3. Los grupos se cargan automáticamente al conectar
 
 ```bash
-tmux attach -t auto-whatsapp
+tmux attach -t auto-whatsapp        # ver logs (salir: Ctrl+B, D)
+tmux kill-session -t auto-whatsapp  # detener
 ```
+
+## Desarrollo y verificación
+
+```bash
+cd server
+npm test          # pruebas de autenticación, validación y parser VCF
+npm run lint      # análisis estático
+npm audit         # vulnerabilidades en dependencias
+```
+
+## Seguridad
+
+El servidor escucha sólo en `127.0.0.1`. Para exponerlo a Internet hace falta un proxy
+con TLS: `auto-whatsapp-nginx.conf` incluye la plantilla, pero **todavía sirve en HTTP
+plano**. Hay que terminar TLS antes de publicarlo.
+
+Medidas activas: autenticación con JWT y contraseña hasheada con bcrypt, límite de
+intentos de login, WebSocket autenticado (el QR de vinculación nunca se emite a clientes
+anónimos), adjuntos protegidos por token, cabeceras de seguridad con CSP, validación de
+entrada por esquema, verificación del contenido real de las imágenes, límites de envío
+anti-bloqueo y **contraseña obligatoria** (campo `password` en el cuerpo) para las
+operaciones destructivas: desvincular, borrar contactos, borrar agenda y reiniciar
+verificaciones. El sistema es **monousuario**: no hay aislamiento de datos entre usuarios.
+
+La auditoría completa, con los hallazgos pendientes, está en [`Docs/`](Docs/README.md).
 
 ## Estructura del proyecto
 
@@ -102,10 +155,20 @@ auto-whatsapp/
 │           ├── StatusForm.jsx          # Formulario de estado
 │           └── StatusList.jsx          # Lista de estados programados
 ├── server/                    # Backend Node.js + Express
+│   ├── test/                  # Pruebas (vitest + supertest)
+│   ├── scripts/
+│   │   └── hash-password.js   # Generador del hash bcrypt
 │   └── src/
-│       ├── index.js           # Servidor Express y configuración
+│       ├── index.js           # Carga del .env y arranque
+│       ├── server.js          # Bootstrap: HTTP, WebSocket, trabajos
+│       ├── app.js             # Aplicación Express y middlewares
+│       ├── auth.js            # JWT, sesiones y autenticación
+│       ├── realtime.js        # Emisión de eventos por WebSocket
+│       ├── logger.js          # Log estructurado con redacción de datos
+│       ├── schemas.js         # Esquemas de validación (zod)
+│       ├── middleware/        # Validación y manejo de errores
 │       ├── whatsapp.js        # Conexión y funciones de WhatsApp
-│       ├── db.js              # Base de datos SQLite
+│       ├── db.js              # Base de datos SQLite (better-sqlite3)
 │       ├── contacts.js        # Gestión de contactos de grupos
 │       ├── agenda.js          # Gestión de agenda y parser VCF
 │       ├── scheduler.js       # Programador de tareas
@@ -118,8 +181,10 @@ auto-whatsapp/
 │           ├── agenda.js           # API de contactos de agenda
 │           ├── groups.js           # API de grupos
 │           └── status.js          # API de estado de conexión
+├── Docs/                      # Auditoría técnica y de seguridad
 ├── start.sh                   # Script de inicio
-└── auto-whatsapp-nginx.conf   # Configuración de Nginx (opcional)
+├── .env.example               # Plantilla de configuración
+└── auto-whatsapp-nginx.conf   # Configuración de Nginx (requiere TLS)
 ```
 
 ## API
@@ -129,7 +194,7 @@ auto-whatsapp/
 |--------|----------|-------------|
 | GET | `/api/status` | Estado de conexión |
 | GET | `/api/qr` | Código QR para vincular |
-| POST | `/api/unlink` | Desvincular WhatsApp |
+| POST | `/api/unlink` | Desvincular WhatsApp (exige `password`) |
 
 ### Grupos
 | Método | Endpoint | Descripción |
@@ -150,6 +215,7 @@ auto-whatsapp/
 |--------|----------|-------------|
 | GET | `/api/direct-messages` | Listar mensajes directos |
 | POST | `/api/direct-messages` | Crear mensaje directo |
+| POST | `/api/direct-messages/send-now` | Envío inmediato (máx. 20 números; responde 202 y el resultado llega por WebSocket) |
 | PUT | `/api/direct-messages/:id` | Editar mensaje pendiente |
 | DELETE | `/api/direct-messages/:id` | Cancelar mensaje pendiente |
 | DELETE | `/api/direct-messages/:id/permanent` | Eliminar mensaje |
@@ -169,7 +235,7 @@ auto-whatsapp/
 |--------|----------|-------------|
 | GET | `/api/contacts` | Listar contactos (paginado) |
 | POST | `/api/contacts/sync` | Sincronizar desde grupos |
-| DELETE | `/api/contacts` | Eliminar todos |
+| DELETE | `/api/contacts` | Eliminar todos (exige `password`) |
 
 ### Contactos de agenda
 | Método | Endpoint | Descripción |
@@ -178,8 +244,8 @@ auto-whatsapp/
 | GET | `/api/agenda/stats` | Estadísticas |
 | POST | `/api/agenda/import` | Importar archivo VCF |
 | POST | `/api/agenda/check` | Verificar en WhatsApp (batch) |
-| POST | `/api/agenda/reset-checks` | Reiniciar verificaciones |
-| DELETE | `/api/agenda` | Eliminar todos |
+| POST | `/api/agenda/reset-checks` | Reiniciar verificaciones (exige `password`) |
+| DELETE | `/api/agenda` | Eliminar todos (exige `password`) |
 
 ## Stack técnico
 

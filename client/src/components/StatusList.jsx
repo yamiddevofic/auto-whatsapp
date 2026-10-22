@@ -1,194 +1,41 @@
 import React, { useState } from 'react';
 import { cancelStatusUpdate, updateStatusUpdateApi, deleteStatusUpdateApi } from '../api.js';
+import { audienceSummary } from './AudiencePicker.jsx';
+import { Icon, Button, Field, Modal, Empty, StatusBadge, formatDate, toDatetimeLocal, toast, confirmDialog, ScheduleField } from './ui.jsx';
 
-const statusConfig = {
-  pending: { label: 'Pendiente', color: '#FFA726', bg: '#FFF3E0' },
-  sent: { label: 'Publicado', color: '#66BB6A', bg: '#E8F5E9' },
-  failed: { label: 'Fallido', color: '#EF5350', bg: '#FFEBEE' },
-  cancelled: { label: 'Cancelado', color: '#BDBDBD', bg: '#F5F5F5' },
-};
-
-const styles = {
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: 14,
-  },
-  th: {
-    textAlign: 'left',
-    padding: '10px 8px',
-    borderBottom: '2px solid #e0e0e0',
-    color: '#555',
-    fontWeight: 600,
-  },
-  td: {
-    padding: '10px 8px',
-    borderBottom: '1px solid #f0f0f0',
-    verticalAlign: 'top',
-  },
-  badge: (status) => {
-    const cfg = statusConfig[status] || statusConfig.pending;
-    return {
-      display: 'inline-block',
-      padding: '3px 10px',
-      borderRadius: 12,
-      fontSize: 12,
-      fontWeight: 600,
-      color: cfg.color,
-      backgroundColor: cfg.bg,
-    };
-  },
-  actionBtn: (color) => ({
-    background: 'none',
-    border: `1px solid ${color}`,
-    color: color,
-    padding: '4px 10px',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 12,
-    marginRight: 4,
-  }),
-  empty: {
-    color: '#999',
-    textAlign: 'center',
-    padding: 20,
-  },
-  content: {
-    maxWidth: 300,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  typeTag: {
-    display: 'inline-block',
-    padding: '2px 8px',
-    borderRadius: 10,
-    fontSize: 11,
-    fontWeight: 600,
-    marginRight: 4,
-  },
-  modal: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-  },
-  modalContent: {
-    background: '#fff',
-    borderRadius: 8,
-    padding: 24,
-    width: '90%',
-    maxWidth: 450,
-  },
-  modalTitle: {
-    margin: '0 0 16px',
-    fontSize: 18,
-    color: '#075E54',
-  },
-  formGroup: {
-    marginBottom: 12,
-  },
-  label: {
-    display: 'block',
-    marginBottom: 4,
-    fontSize: 13,
-    color: '#555',
-    fontWeight: 600,
-  },
-  input: {
-    width: '100%',
-    padding: '8px 10px',
-    border: '1px solid #ccc',
-    borderRadius: 4,
-    fontSize: 14,
-    boxSizing: 'border-box',
-  },
-  textarea: {
-    width: '100%',
-    padding: '8px 10px',
-    border: '1px solid #ccc',
-    borderRadius: 4,
-    fontSize: 14,
-    minHeight: 80,
-    resize: 'vertical',
-    boxSizing: 'border-box',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: 8,
-    marginTop: 16,
-  },
-  btnPrimary: {
-    background: '#075E54',
-    color: '#fff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 14,
-    fontWeight: 600,
-  },
-  btnSecondary: {
-    background: 'none',
-    border: '1px solid #ccc',
-    color: '#555',
-    padding: '8px 16px',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 14,
-  },
-};
-
-function formatDate(iso) {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleString('es-ES', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function toDatetimeLocal(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function getTypeLabel(su) {
+function typeOf(su) {
   const hasText = !!su.content;
   const hasImage = !!su.image_path;
-  if (hasText && hasImage) return { label: 'Texto + Imagen', color: '#7B1FA2', bg: '#F3E5F5' };
-  if (hasImage) return { label: 'Imagen', color: '#1565C0', bg: '#E3F2FD' };
-  return { label: 'Texto', color: '#2E7D32', bg: '#E8F5E9' };
+  if (hasText && hasImage) return { label: 'Texto + imagen', icon: 'image' };
+  if (hasImage) return { label: 'Imagen', icon: 'image' };
+  return { label: 'Texto', icon: 'file' };
 }
 
 export default function StatusList({ statusUpdates, onRefresh }) {
   const [editingSu, setEditingSu] = useState(null);
   const [editContent, setEditContent] = useState('');
   const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [busy, setBusy] = useState(false);
 
   if (statusUpdates.length === 0) {
-    return <p style={styles.empty}>No hay estados programados</p>;
+    return (
+      <Empty icon="status" title="No hay estados programados">
+        Programa un estado con texto o imágenes y aparecerá aquí.
+      </Empty>
+    );
   }
 
   const handleCancel = async (id) => {
+    if (!(await confirmDialog({ title: '¿Cancelar este estado?', message: 'No se publicará.', confirmLabel: 'Cancelar estado', danger: true }))) return;
     await cancelStatusUpdate(id);
+    toast.info('Estado cancelado');
     onRefresh();
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Estas seguro de que quieres eliminar este estado?')) return;
+    if (!(await confirmDialog({ title: '¿Eliminar este estado?', message: 'Se borrará de forma permanente.', confirmLabel: 'Eliminar', danger: true }))) return;
     await deleteStatusUpdateApi(id);
+    toast.success('Estado eliminado');
     onRefresh();
   };
 
@@ -198,72 +45,55 @@ export default function StatusList({ statusUpdates, onRefresh }) {
     setEditScheduledAt(toDatetimeLocal(su.scheduled_at));
   };
 
-  const handleEditSave = async () => {
+  const handleEditSave = async (e) => {
+    e.preventDefault();
     if (!editingSu) return;
-    await updateStatusUpdateApi(editingSu.id, {
-      content: editContent,
-      scheduledAt: new Date(editScheduledAt).toISOString(),
-    });
-    setEditingSu(null);
-    onRefresh();
+    setBusy(true);
+    try {
+      await updateStatusUpdateApi(editingSu.id, {
+        content: editContent,
+        scheduledAt: new Date(editScheduledAt).toISOString(),
+      });
+      setEditingSu(null);
+      toast.success('Cambios guardados');
+      onRefresh();
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const actions = (su) => (
+    <>
+      {su.status === 'pending' && (
+        <>
+          <Button size="sm" icon="edit" onClick={() => openEdit(su)}>Editar</Button>
+          <Button size="sm" variant="ghost" icon="ban" onClick={() => handleCancel(su.id)}>Cancelar</Button>
+        </>
+      )}
+      <Button size="sm" variant="ghost" className="btn-icon" aria-label="Eliminar" title="Eliminar" onClick={() => handleDelete(su.id)}>
+        <Icon name="trash" size="sm" />
+      </Button>
+    </>
+  );
 
   return (
     <>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={styles.table}>
+      <div className="table-wrap responsive">
+        <table className="table">
           <thead>
-            <tr>
-              <th style={styles.th}>Tipo</th>
-              <th style={styles.th}>Contenido</th>
-              <th style={styles.th}>Programado</th>
-              <th style={styles.th}>Estado</th>
-              <th style={styles.th}>Acciones</th>
-            </tr>
+            <tr><th>Tipo</th><th>Contenido</th><th>Audiencia</th><th>Programado</th><th>Estado</th><th aria-label="Acciones" /></tr>
           </thead>
           <tbody>
             {statusUpdates.map((su) => {
-              const typeInfo = getTypeLabel(su);
+              const t = typeOf(su);
               return (
                 <tr key={su.id}>
-                  <td style={styles.td}>
-                    <span style={{ ...styles.typeTag, color: typeInfo.color, backgroundColor: typeInfo.bg }}>
-                      {typeInfo.label}
-                    </span>
-                  </td>
-                  <td style={{ ...styles.td, ...styles.content }} title={su.content || '(solo imagen)'}>
-                    {su.content || '(solo imagen)'}
-                  </td>
-                  <td style={styles.td}>{formatDate(su.scheduled_at)}</td>
-                  <td style={styles.td}>
-                    <span style={styles.badge(su.status)}>
-                      {statusConfig[su.status]?.label || su.status}
-                    </span>
-                  </td>
-                  <td style={styles.td}>
-                    {su.status === 'pending' && (
-                      <>
-                        <button
-                          style={styles.actionBtn('#1E88E5')}
-                          onClick={() => openEdit(su)}
-                        >
-                          Editar
-                        </button>
-                        <button
-                          style={styles.actionBtn('#EF5350')}
-                          onClick={() => handleCancel(su.id)}
-                        >
-                          Cancelar
-                        </button>
-                      </>
-                    )}
-                    <button
-                      style={styles.actionBtn('#757575')}
-                      onClick={() => handleDelete(su.id)}
-                    >
-                      Eliminar
-                    </button>
-                  </td>
+                  <td><span className="badge badge-info badge-plain"><Icon name={t.icon} size="sm" />{t.label}</span></td>
+                  <td className="cell-clip" title={su.content || ''}>{su.content || <span className="muted">(solo imagen)</span>}</td>
+                  <td className="muted" style={{ fontSize: 13 }}>{audienceSummary(su.audience)}</td>
+                  <td className="nowrap">{formatDate(su.scheduled_at)}</td>
+                  <td><StatusBadge status={su.status} sentLabel="Publicado" /></td>
+                  <td><div className="cell-actions">{actions(su)}</div></td>
                 </tr>
               );
             })}
@@ -271,37 +101,39 @@ export default function StatusList({ statusUpdates, onRefresh }) {
         </table>
       </div>
 
+      <div className="items">
+        {statusUpdates.map((su) => {
+          const t = typeOf(su);
+          return (
+            <article className="item" key={su.id}>
+              <div className="item-top">
+                <span className="badge badge-info badge-plain"><Icon name={t.icon} size="sm" />{t.label}</span>
+                <StatusBadge status={su.status} sentLabel="Publicado" />
+              </div>
+              <p className="item-text">{su.content || <span className="muted">(solo imagen)</span>}</p>
+              <div className="item-meta"><span><Icon name="clock" size="sm" className="inline-icon" /> {formatDate(su.scheduled_at)}</span><span>{audienceSummary(su.audience)}</span></div>
+              <div className="row" style={{ justifyContent: 'flex-end' }}>{actions(su)}</div>
+            </article>
+          );
+        })}
+      </div>
+
       {editingSu && (
-        <div style={styles.modal} onClick={() => setEditingSu(null)}>
-          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Editar estado</h3>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Texto</label>
-              <textarea
-                style={styles.textarea}
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-              />
+        <Modal onClose={() => setEditingSu(null)} labelledBy="edit-st">
+          <form onSubmit={handleEditSave}>
+            <div className="modal-head"><div><h3 id="edit-st">Editar estado</h3></div></div>
+            <div className="modal-body">
+              <Field label="Texto" htmlFor="es-c">
+                <textarea id="es-c" data-autofocus className="textarea" value={editContent} onChange={(e) => setEditContent(e.target.value)} />
+              </Field>
+              <ScheduleField label="Fecha y hora" value={editScheduledAt} onChange={setEditScheduledAt} />
             </div>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Fecha y hora</label>
-              <input
-                type="datetime-local"
-                style={styles.input}
-                value={editScheduledAt}
-                onChange={(e) => setEditScheduledAt(e.target.value)}
-              />
+            <div className="modal-foot">
+              <Button type="button" onClick={() => setEditingSu(null)}>Cancelar</Button>
+              <Button type="submit" variant="primary" loading={busy} disabled={!editScheduledAt}>Guardar</Button>
             </div>
-            <div style={styles.modalActions}>
-              <button style={styles.btnSecondary} onClick={() => setEditingSu(null)}>
-                Cancelar
-              </button>
-              <button style={styles.btnPrimary} onClick={handleEditSave}>
-                Guardar
-              </button>
-            </div>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
     </>
   );

@@ -1,4 +1,4 @@
-import db from './db.js';
+import db, { dropColumnIfExists } from './db.js';
 
 export function initAgendaTable() {
   db.exec(`
@@ -8,27 +8,32 @@ export function initAgendaTable() {
       jid TEXT,
       on_whatsapp INTEGER DEFAULT 0,
       checked_at TEXT,
-      imported_at TEXT NOT NULL DEFAULT (datetime('now')),
-      user_id TEXT NOT NULL DEFAULT 'default'
+      imported_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
+  `);
+
+  // Sistema monousuario: ver SEC-019 y el comentario equivalente en contacts.js
+  dropColumnIfExists('agenda_contacts', 'user_id');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_agenda_jid     ON agenda_contacts(jid);
+    CREATE INDEX IF NOT EXISTS idx_agenda_checked ON agenda_contacts(checked_at);
   `);
 }
 
-export function importAgendaContacts(contactsList, userId = 'default') {
+export function importAgendaContacts(contactsList) {
   if (contactsList.length === 0) return 0;
 
   const stmt = db.prepare(`
-    INSERT INTO agenda_contacts (phone, name, imported_at, user_id)
-    VALUES (?, ?, datetime('now'), ?)
+    INSERT INTO agenda_contacts (phone, name, imported_at)
+    VALUES (?, ?, datetime('now'))
     ON CONFLICT(phone) DO UPDATE SET
       name = excluded.name,
-      imported_at = datetime('now'),
-      user_id = excluded.user_id
+      imported_at = datetime('now')
   `);
 
   const tx = db.transaction((list) => {
     for (const c of list) {
-      stmt.run(c.phone, c.name, userId);
+      stmt.run(c.phone, c.name);
     }
   });
 
@@ -38,6 +43,34 @@ export function importAgendaContacts(contactsList, userId = 'default') {
 
 export function getAllAgendaContacts() {
   return db.prepare('SELECT * FROM agenda_contacts ORDER BY name').all();
+}
+
+const AGENDA_FILTERS = {
+  all: '',
+  whatsapp: 'on_whatsapp = 1',
+  not_whatsapp: 'on_whatsapp = 0 AND checked_at IS NOT NULL',
+  unchecked: 'checked_at IS NULL',
+};
+
+/** Filtro, búsqueda y paginación en SQL (ARQ-004). */
+export function findAgendaContacts({ search = '', filter = 'all', limit = 50, offset = 0 } = {}) {
+  const conditions = [];
+  const params = {};
+  if (AGENDA_FILTERS[filter]) conditions.push(AGENDA_FILTERS[filter]);
+  if (search) {
+    conditions.push(`(lower(name) LIKE @q ESCAPE '\\' OR phone LIKE @q ESCAPE '\\')`);
+    params.q = `%${search.toLowerCase().replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const args = search ? [params] : [];
+
+  const total = db.prepare(`SELECT COUNT(*) AS n FROM agenda_contacts ${where}`).get(...args).n;
+  const items = db.prepare(`
+    SELECT * FROM agenda_contacts ${where}
+    ORDER BY name LIMIT ${Number(limit)} OFFSET ${Number(offset)}
+  `).all(...args);
+
+  return { items, total };
 }
 
 export function getAgendaCount() {

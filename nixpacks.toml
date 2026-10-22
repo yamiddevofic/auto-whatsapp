@@ -1,10 +1,9 @@
 [phases.setup]
-nixPkgs = ["nodejs_20"]
+nixPkgs = ["nodejs_22"]
 
 [phases.install]
 cmds = [
-  "npm ci",
-  "cd server && npm ci",
+  "cd server && npm ci --omit=dev",
   "cd client && npm ci"
 ]
 

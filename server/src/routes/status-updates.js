@@ -1,152 +1,145 @@
 import { Router } from 'express';
-import { createStatusUpdate, getAllStatusUpdates, cancelStatusUpdate, getStatusUpdateById, updateStatusUpdate, deleteStatusUpdate } from '../db.js';
+import {
+  createStatusUpdate, getAllStatusUpdates, cancelStatusUpdate, getStatusUpdateById,
+  updateStatusUpdate, deleteStatusUpdate, getAllPublishedStatuses,
+} from '../db.js';
 import { scheduleStatusUpdateJob, cancelScheduledStatusUpdate } from '../scheduler.js';
-import { sendStatusUpdate } from '../whatsapp.js';
-import { io } from '../index.js';
+import { sendStatusUpdate, countStatusAudiences } from '../whatsapp.js';
+import { emit } from '../realtime.js';
+import { logger } from '../logger.js';
+import { validate } from '../middleware/validate.js';
+import {
+  createStatusUpdateSchema, sendStatusNowSchema, updateStatusUpdateSchema, statusAudienceQuerySchema,
+} from '../schemas.js';
+import { validateQuery } from '../middleware/validate.js';
+import { parseId, httpError, asyncRoute } from '../middleware/error-handler.js';
 
 const router = Router();
 
+const imagePathsOf = (req) => (req.files || []).map((file) => file.path);
+
 router.get('/api/status-updates', (req, res) => {
-  const updates = getAllStatusUpdates();
-  res.json(updates);
+  res.json(getAllStatusUpdates());
 });
 
-router.post('/api/status-updates/send-now', async (req, res) => {
-  try {
-    const { content } = req.body;
-    const imagePaths = (req.files || []).map((f) => f.path);
+// Cuántas personas recibirían un estado con cada audiencia (para mostrarlo antes de publicar)
+router.get('/api/status-audience', validateQuery(statusAudienceQuerySchema), asyncRoute(async (req, res) => {
+  res.json(await countStatusAudiences(req.validatedQuery.groupIds));
+}));
 
-    if (!content && imagePaths.length === 0) {
-      return res.status(400).json({ error: 'Se requiere texto o imagen' });
-    }
+router.post('/api/status-updates/send-now', validate(sendStatusNowSchema), asyncRoute(async (req, res) => {
+  const { content, audience } = req.body;
+  const imagePaths = imagePathsOf(req);
 
-    if (imagePaths.length <= 1) {
-      // Single image or text-only
-      const imagePath = imagePaths[0] || null;
-      console.log('[StatusUpdate] Sending now:', { content: content?.substring(0, 30), imagePath });
-      await sendStatusUpdate(content || null, imagePath);
-    } else {
-      // Multiple images — send one by one in order
-      for (let i = 0; i < imagePaths.length; i++) {
-        const caption = i === 0 ? (content || null) : null;
-        console.log(`[StatusUpdate] Sending image ${i + 1}/${imagePaths.length}:`, imagePaths[i]);
-        await sendStatusUpdate(caption, imagePaths[i]);
-      }
-    }
-
-    res.json({ success: true });
-  } catch (err) {
-    console.error('[StatusUpdate] Send now failed:', err.message);
-    res.status(500).json({ error: err.message });
+  if (!content && imagePaths.length === 0) {
+    throw httpError(400, 'Se requiere texto o imagen');
   }
-});
 
-router.post('/api/status-updates', (req, res) => {
-  try {
-    const { content, scheduledAt } = req.body;
-
-    if (!scheduledAt) {
-      return res.status(400).json({ error: 'Se requiere fecha y hora de envio' });
+  if (imagePaths.length <= 1) {
+    logger.info({ images: imagePaths.length }, 'Publicando estado inmediato');
+    await sendStatusUpdate(content || null, imagePaths[0] || null, audience);
+  } else {
+    // Varias imágenes: se publican en orden, una por estado
+    for (let i = 0; i < imagePaths.length; i++) {
+      logger.info({ index: i + 1, total: imagePaths.length }, 'Publicando imagen de estado');
+      await sendStatusUpdate(i === 0 ? (content || null) : null, imagePaths[i], audience);
     }
+  }
 
-    const imagePaths = (req.files || []).map((f) => f.path);
+  emit('published-statuses:updated', getAllPublishedStatuses());
+  res.json({ success: true });
+}));
+
+router.post('/api/status-updates', validate(createStatusUpdateSchema), (req, res, next) => {
+  try {
+    const { content, scheduledAt, audience } = req.body;
+    const imagePaths = imagePathsOf(req);
 
     if (!content && imagePaths.length === 0) {
-      return res.status(400).json({ error: 'Se requiere texto o imagen' });
+      throw httpError(400, 'Se requiere texto o imagen');
     }
 
     const created = [];
 
     if (imagePaths.length <= 1) {
-      // Single image or text-only
-      const su = createStatusUpdate({
+      const statusUpdate = createStatusUpdate({
         content: content || null,
         imagePath: imagePaths[0] || null,
         scheduledAt,
+        audience,
       });
-      scheduleStatusUpdateJob(su);
-      created.push(su);
+      scheduleStatusUpdateJob(statusUpdate);
+      created.push(statusUpdate);
     } else {
-      // Multiple images — create one status per image, staggered by 5 seconds
+      // Una publicación por imagen, escalonadas 5 segundos para no parecer automatizado
       const baseTime = new Date(scheduledAt).getTime();
       for (let i = 0; i < imagePaths.length; i++) {
-        const staggeredTime = new Date(baseTime + i * 5000).toISOString();
-        const caption = i === 0 ? (content || null) : null;
-        const su = createStatusUpdate({
-          content: caption,
+        const statusUpdate = createStatusUpdate({
+          content: i === 0 ? (content || null) : null,
           imagePath: imagePaths[i],
-          scheduledAt: staggeredTime,
+          scheduledAt: new Date(baseTime + i * 5000).toISOString(),
+          audience,
         });
-        scheduleStatusUpdateJob(su);
-        created.push(su);
+        scheduleStatusUpdateJob(statusUpdate);
+        created.push(statusUpdate);
       }
     }
 
-    io.emit('status-updates:updated', getAllStatusUpdates());
+    emit('status-updates:updated', getAllStatusUpdates());
     res.status(201).json({ success: true, count: created.length, items: created });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-router.delete('/api/status-updates/:id', (req, res) => {
-  const id = parseInt(req.params.id);
-  const su = getStatusUpdateById(id);
-
-  if (!su) {
-    return res.status(404).json({ error: 'Status update not found' });
-  }
-
-  if (su.status !== 'pending') {
-    return res.status(400).json({ error: 'Solo se pueden cancelar estados pendientes' });
-  }
-
-  cancelScheduledStatusUpdate(id);
-  cancelStatusUpdate(id);
-  io.emit('status-updates:updated', getAllStatusUpdates());
-  res.json({ success: true });
-});
-
-router.put('/api/status-updates/:id', (req, res) => {
+router.delete('/api/status-updates/:id', parseId, (req, res, next) => {
   try {
-    const id = parseInt(req.params.id);
-    const su = getStatusUpdateById(id);
-
-    if (!su) {
-      return res.status(404).json({ error: 'Status update not found' });
+    const statusUpdate = getStatusUpdateById(req.id);
+    if (!statusUpdate) throw httpError(404, 'Estado no encontrado');
+    if (statusUpdate.status !== 'pending') {
+      throw httpError(400, 'Solo se pueden cancelar estados pendientes');
     }
 
-    if (su.status !== 'pending') {
-      return res.status(400).json({ error: 'Solo se pueden editar estados pendientes' });
+    cancelScheduledStatusUpdate(req.id);
+    cancelStatusUpdate(req.id);
+    emit('status-updates:updated', getAllStatusUpdates());
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.put('/api/status-updates/:id', parseId, validate(updateStatusUpdateSchema), (req, res, next) => {
+  try {
+    const statusUpdate = getStatusUpdateById(req.id);
+    if (!statusUpdate) throw httpError(404, 'Estado no encontrado');
+    if (statusUpdate.status !== 'pending') {
+      throw httpError(400, 'Solo se pueden editar estados pendientes');
     }
 
-    const { content, scheduledAt } = req.body;
-    const updated = updateStatusUpdate(id, { content, scheduledAt });
-
-    cancelScheduledStatusUpdate(id);
+    const updated = updateStatusUpdate(req.id, req.body);
+    cancelScheduledStatusUpdate(req.id);
     scheduleStatusUpdateJob(updated);
-    io.emit('status-updates:updated', getAllStatusUpdates());
+    emit('status-updates:updated', getAllStatusUpdates());
     res.json(updated);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    next(err);
   }
 });
 
-router.delete('/api/status-updates/:id/permanent', (req, res) => {
-  const id = parseInt(req.params.id);
-  const su = getStatusUpdateById(id);
+router.delete('/api/status-updates/:id/permanent', parseId, (req, res, next) => {
+  try {
+    const statusUpdate = getStatusUpdateById(req.id);
+    if (!statusUpdate) throw httpError(404, 'Estado no encontrado');
 
-  if (!su) {
-    return res.status(404).json({ error: 'Status update not found' });
+    if (statusUpdate.status === 'pending') cancelScheduledStatusUpdate(req.id);
+
+    deleteStatusUpdate(req.id);
+    emit('status-updates:updated', getAllStatusUpdates());
+    res.json({ success: true });
+  } catch (err) {
+    next(err);
   }
-
-  if (su.status === 'pending') {
-    cancelScheduledStatusUpdate(id);
-  }
-
-  deleteStatusUpdate(id);
-  io.emit('status-updates:updated', getAllStatusUpdates());
-  res.json({ success: true });
 });
 
 export default router;

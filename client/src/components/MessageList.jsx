@@ -1,178 +1,32 @@
 import React, { useState } from 'react';
 import { cancelMessage, updateMessageApi, deleteMessageApi } from '../api.js';
-
-const statusConfig = {
-  pending: { label: 'Pendiente', color: '#FFA726', bg: '#FFF3E0' },
-  sent: { label: 'Enviado', color: '#66BB6A', bg: '#E8F5E9' },
-  failed: { label: 'Fallido', color: '#EF5350', bg: '#FFEBEE' },
-  cancelled: { label: 'Cancelado', color: '#BDBDBD', bg: '#F5F5F5' },
-};
-
-const styles = {
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
-    fontSize: 14,
-  },
-  th: {
-    textAlign: 'left',
-    padding: '10px 8px',
-    borderBottom: '2px solid #e0e0e0',
-    color: '#555',
-    fontWeight: 600,
-  },
-  td: {
-    padding: '10px 8px',
-    borderBottom: '1px solid #f0f0f0',
-    verticalAlign: 'top',
-  },
-  badge: (status) => {
-    const cfg = statusConfig[status] || statusConfig.pending;
-    return {
-      display: 'inline-block',
-      padding: '3px 10px',
-      borderRadius: 12,
-      fontSize: 12,
-      fontWeight: 600,
-      color: cfg.color,
-      backgroundColor: cfg.bg,
-    };
-  },
-  actionBtn: (color) => ({
-    background: 'none',
-    border: `1px solid ${color}`,
-    color: color,
-    padding: '4px 10px',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 12,
-    marginRight: 4,
-  }),
-  empty: {
-    color: '#999',
-    textAlign: 'center',
-    padding: 20,
-  },
-  content: {
-    maxWidth: 250,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  modal: {
-    position: 'fixed',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: 'rgba(0,0,0,0.5)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 1000,
-  },
-  modalContent: {
-    background: '#fff',
-    borderRadius: 8,
-    padding: 24,
-    width: '90%',
-    maxWidth: 450,
-  },
-  modalTitle: {
-    margin: '0 0 16px',
-    fontSize: 18,
-    color: '#075E54',
-  },
-  formGroup: {
-    marginBottom: 12,
-  },
-  label: {
-    display: 'block',
-    marginBottom: 4,
-    fontSize: 13,
-    color: '#555',
-    fontWeight: 600,
-  },
-  input: {
-    width: '100%',
-    padding: '8px 10px',
-    border: '1px solid #ccc',
-    borderRadius: 4,
-    fontSize: 14,
-    boxSizing: 'border-box',
-  },
-  textarea: {
-    width: '100%',
-    padding: '8px 10px',
-    border: '1px solid #ccc',
-    borderRadius: 4,
-    fontSize: 14,
-    minHeight: 80,
-    resize: 'vertical',
-    boxSizing: 'border-box',
-  },
-  modalActions: {
-    display: 'flex',
-    justifyContent: 'flex-end',
-    gap: 8,
-    marginTop: 16,
-  },
-  btnPrimary: {
-    background: '#25D366',
-    color: '#fff',
-    border: 'none',
-    padding: '8px 16px',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 14,
-    fontWeight: 600,
-  },
-  btnSecondary: {
-    background: 'none',
-    border: '1px solid #ccc',
-    color: '#555',
-    padding: '8px 16px',
-    borderRadius: 4,
-    cursor: 'pointer',
-    fontSize: 14,
-  },
-};
-
-function formatDate(iso) {
-  if (!iso) return '-';
-  return new Date(iso).toLocaleString('es-ES', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-function toDatetimeLocal(iso) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+import { Icon, Button, Field, Modal, Empty, StatusBadge, formatDate, toDatetimeLocal, toast, confirmDialog, ScheduleField } from './ui.jsx';
 
 export default function MessageList({ messages, onRefresh }) {
   const [editingMsg, setEditingMsg] = useState(null);
   const [editContent, setEditContent] = useState('');
   const [editScheduledAt, setEditScheduledAt] = useState('');
+  const [busy, setBusy] = useState(false);
 
   if (messages.length === 0) {
-    return <p style={styles.empty}>No hay mensajes programados</p>;
+    return (
+      <Empty icon="send" title="Aún no hay mensajes programados">
+        Elige un grupo arriba y programa tu primer mensaje.
+      </Empty>
+    );
   }
 
   const handleCancel = async (id) => {
+    if (!(await confirmDialog({ title: '¿Cancelar este envío?', message: 'El mensaje no se enviará. Podrás eliminarlo después.', confirmLabel: 'Cancelar envío', danger: true }))) return;
     await cancelMessage(id);
+    toast.info('Envío cancelado');
     onRefresh();
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de que quieres eliminar este mensaje?')) return;
+    if (!(await confirmDialog({ title: '¿Eliminar este mensaje?', message: 'Se borrará de forma permanente.', confirmLabel: 'Eliminar', danger: true }))) return;
     await deleteMessageApi(id);
+    toast.success('Mensaje eliminado');
     onRefresh();
   };
 
@@ -182,103 +36,88 @@ export default function MessageList({ messages, onRefresh }) {
     setEditScheduledAt(toDatetimeLocal(msg.scheduled_at));
   };
 
-  const handleEditSave = async () => {
+  const handleEditSave = async (e) => {
+    e.preventDefault();
     if (!editingMsg) return;
-    await updateMessageApi(editingMsg.id, {
-      content: editContent,
-      scheduledAt: new Date(editScheduledAt).toISOString(),
-    });
-    setEditingMsg(null);
-    onRefresh();
+    setBusy(true);
+    try {
+      await updateMessageApi(editingMsg.id, {
+        content: editContent,
+        scheduledAt: new Date(editScheduledAt).toISOString(),
+      });
+      setEditingMsg(null);
+      toast.success('Cambios guardados');
+      onRefresh();
+    } finally {
+      setBusy(false);
+    }
   };
+
+  const actions = (msg) => (
+    <>
+      {msg.status === 'pending' && (
+        <>
+          <Button size="sm" variant="secondary" icon="edit" onClick={() => openEdit(msg)}>Editar</Button>
+          <Button size="sm" variant="ghost" icon="ban" onClick={() => handleCancel(msg.id)}>Cancelar</Button>
+        </>
+      )}
+      <Button size="sm" variant="ghost" className="btn-icon" aria-label="Eliminar" title="Eliminar" onClick={() => handleDelete(msg.id)}>
+        <Icon name="trash" size="sm" />
+      </Button>
+    </>
+  );
 
   return (
     <>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={styles.table}>
+      <div className="table-wrap responsive">
+        <table className="table">
           <thead>
-            <tr>
-              <th style={styles.th}>Grupo</th>
-              <th style={styles.th}>Mensaje</th>
-              <th style={styles.th}>Programado</th>
-              <th style={styles.th}>Estado</th>
-              <th style={styles.th}>Acciones</th>
-            </tr>
+            <tr><th>Grupo</th><th>Mensaje</th><th>Programado</th><th>Estado</th><th aria-label="Acciones" /></tr>
           </thead>
           <tbody>
             {messages.map((msg) => (
               <tr key={msg.id}>
-                <td style={styles.td}>{msg.group_name}</td>
-                <td style={{ ...styles.td, ...styles.content }} title={msg.content}>
-                  {msg.content}
-                </td>
-                <td style={styles.td}>{formatDate(msg.scheduled_at)}</td>
-                <td style={styles.td}>
-                  <span style={styles.badge(msg.status)}>
-                    {statusConfig[msg.status]?.label || msg.status}
-                  </span>
-                </td>
-                <td style={styles.td}>
-                  {msg.status === 'pending' && (
-                    <>
-                      <button
-                        style={styles.actionBtn('#1E88E5')}
-                        onClick={() => openEdit(msg)}
-                      >
-                        Editar
-                      </button>
-                      <button
-                        style={styles.actionBtn('#EF5350')}
-                        onClick={() => handleCancel(msg.id)}
-                      >
-                        Cancelar
-                      </button>
-                    </>
-                  )}
-                  <button
-                    style={styles.actionBtn('#757575')}
-                    onClick={() => handleDelete(msg.id)}
-                  >
-                    Eliminar
-                  </button>
-                </td>
+                <td><b>{msg.group_name}</b></td>
+                <td className="cell-clip" title={msg.content}>{msg.content}</td>
+                <td className="nowrap">{formatDate(msg.scheduled_at)}</td>
+                <td><StatusBadge status={msg.status} /></td>
+                <td><div className="cell-actions">{actions(msg)}</div></td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
+      <div className="items">
+        {messages.map((msg) => (
+          <article className="item" key={msg.id}>
+            <div className="item-top">
+              <span className="item-title">{msg.group_name}</span>
+              <StatusBadge status={msg.status} />
+            </div>
+            <p className="item-text">{msg.content}</p>
+            <div className="item-meta"><span><Icon name="clock" size="sm" className="inline-icon" /> {formatDate(msg.scheduled_at)}</span></div>
+            <div className="row" style={{ justifyContent: 'flex-end' }}>{actions(msg)}</div>
+          </article>
+        ))}
+      </div>
+
       {editingMsg && (
-        <div style={styles.modal} onClick={() => setEditingMsg(null)}>
-          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-            <h3 style={styles.modalTitle}>Editar mensaje</h3>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Mensaje</label>
-              <textarea
-                style={styles.textarea}
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-              />
+        <Modal onClose={() => setEditingMsg(null)} labelledBy="edit-msg">
+          <form onSubmit={handleEditSave}>
+            <div className="modal-head"><div><h3 id="edit-msg">Editar mensaje</h3><p>{editingMsg.group_name}</p></div></div>
+            <div className="modal-body">
+              <Field label="Mensaje" htmlFor="em-c">
+                <textarea id="em-c" data-autofocus className="textarea" value={editContent} onChange={(e) => setEditContent(e.target.value)} required />
+              </Field>
+              <ScheduleField label="Fecha y hora" value={editScheduledAt} onChange={setEditScheduledAt} />
             </div>
-            <div style={styles.formGroup}>
-              <label style={styles.label}>Fecha y hora</label>
-              <input
-                type="datetime-local"
-                style={styles.input}
-                value={editScheduledAt}
-                onChange={(e) => setEditScheduledAt(e.target.value)}
-              />
+            <div className="modal-foot">
+              <Button type="button" onClick={() => setEditingMsg(null)}>Cancelar</Button>
+              <Button type="submit" variant="primary" loading={busy} disabled={!editContent.trim() || !editScheduledAt}>Guardar</Button>
             </div>
-            <div style={styles.modalActions}>
-              <button style={styles.btnSecondary} onClick={() => setEditingMsg(null)}>
-                Cancelar
-              </button>
-              <button style={styles.btnPrimary} onClick={handleEditSave}>
-                Guardar
-              </button>
-            </div>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
     </>
   );

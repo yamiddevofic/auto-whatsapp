@@ -1,227 +1,104 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
+import { Icon, Field } from './ui.jsx';
 
-const styles = {
-  container: {
-    marginBottom: 16,
-  },
-  label: {
-    display: 'block',
-    fontSize: 14,
-    fontWeight: 500,
-    marginBottom: 6,
-    color: '#333',
-  },
-  input: {
-    fontSize: 14,
-  },
-  previewGrid: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 10,
-  },
-  previewItem: {
-    position: 'relative',
-    cursor: 'grab',
-    border: '2px solid transparent',
-    borderRadius: 8,
-    overflow: 'hidden',
-    transition: 'border-color 0.2s',
-  },
-  previewItemDragging: {
-    opacity: 0.4,
-    border: '2px dashed #075E54',
-  },
-  previewItemOver: {
-    border: '2px solid #075E54',
-  },
-  previewImage: {
-    width: 120,
-    height: 90,
-    objectFit: 'cover',
-    display: 'block',
-  },
-  orderBadge: {
-    position: 'absolute',
-    top: 4,
-    left: 4,
-    backgroundColor: '#075E54',
-    color: '#fff',
-    borderRadius: '50%',
-    width: 22,
-    height: 22,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: 12,
-    fontWeight: 700,
-  },
-  removeBtn: {
-    position: 'absolute',
-    top: 4,
-    right: 4,
-    background: 'rgba(0,0,0,0.6)',
-    border: 'none',
-    color: '#fff',
-    cursor: 'pointer',
-    fontSize: 14,
-    fontWeight: 700,
-    borderRadius: '50%',
-    width: 20,
-    height: 20,
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 0,
-    lineHeight: 1,
-  },
-  clearBtn: {
-    marginTop: 8,
-    background: 'none',
-    border: 'none',
-    color: '#EF5350',
-    cursor: 'pointer',
-    fontSize: 13,
-    padding: 0,
-  },
-  hint: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 4,
-  },
-};
-
+/**
+ * Subida de imágenes con arrastrar-y-soltar. Soporta el modo de un solo archivo
+ * (file / onFileChange) y el múltiple reordenable (files / onFilesChange).
+ */
 export default function ImageUpload({ files, onFilesChange, file, onFileChange, multiple = false }) {
   const inputRef = useRef();
   const [dragIndex, setDragIndex] = useState(null);
   const [overIndex, setOverIndex] = useState(null);
+  const [dropActive, setDropActive] = useState(false);
 
-  // Support legacy single-file props (file/onFileChange) and new multi-file props (files/onFilesChange)
   const isLegacy = !multiple && onFileChange;
   const actualFiles = isLegacy ? file : files;
   const actualOnChange = isLegacy ? onFileChange : onFilesChange;
-
-  // Support both single file (legacy) and multiple files
   const fileList = multiple ? (actualFiles || []) : (actualFiles ? [actualFiles] : []);
 
-  const handleChange = (e) => {
-    const selected = Array.from(e.target.files);
-    if (!selected.length) return;
-    if (multiple) {
-      actualOnChange([...fileList, ...selected]);
-    } else {
-      actualOnChange(selected[0] || null);
-    }
-    // Reset input so re-selecting same file works
-    e.target.value = '';
+  // Las URLs de vista previa se crean una vez por archivo y se liberan al desmontar
+  const urls = useMemo(() => fileList.map((f) => URL.createObjectURL(f)), [fileList.map((f) => `${f.name}${f.size}${f.lastModified}`).join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => urls.forEach((u) => URL.revokeObjectURL(u)), [urls]);
+
+  const accept = (list) => {
+    const imgs = Array.from(list).filter((f) => f.type.startsWith('image/'));
+    if (!imgs.length) return;
+    if (multiple) actualOnChange([...fileList, ...imgs]);
+    else actualOnChange(imgs[0]);
   };
 
   const handleRemove = (index) => {
-    if (multiple) {
-      const next = fileList.filter((_, i) => i !== index);
-      actualOnChange(next);
-    } else {
-      actualOnChange(null);
-      inputRef.current.value = '';
-    }
-  };
-
-  const handleDragStart = (e, index) => {
-    setDragIndex(index);
-    e.dataTransfer.effectAllowed = 'move';
-  };
-
-  const handleDragOver = (e, index) => {
-    e.preventDefault();
-    setOverIndex(index);
+    if (multiple) actualOnChange(fileList.filter((_, i) => i !== index));
+    else actualOnChange(null);
   };
 
   const handleDrop = (e, dropIndex) => {
     e.preventDefault();
-    if (dragIndex === null || dragIndex === dropIndex) {
-      setDragIndex(null);
-      setOverIndex(null);
-      return;
+    if (dragIndex !== null && dragIndex !== dropIndex) {
+      const reordered = [...fileList];
+      const [moved] = reordered.splice(dragIndex, 1);
+      reordered.splice(dropIndex, 0, moved);
+      actualOnChange(reordered);
     }
-    const reordered = [...fileList];
-    const [moved] = reordered.splice(dragIndex, 1);
-    reordered.splice(dropIndex, 0, moved);
-    actualOnChange(reordered);
     setDragIndex(null);
     setOverIndex(null);
   };
 
-  const handleDragEnd = () => {
-    setDragIndex(null);
-    setOverIndex(null);
-  };
+  const showDropzone = multiple || fileList.length === 0;
 
   return (
-    <div style={styles.container}>
-      <label style={styles.label}>
-        {multiple ? 'Imagenes (puedes seleccionar varias)' : 'Imagen (opcional)'}
-      </label>
+    <Field label={multiple ? 'Imágenes' : 'Imagen'} extra={multiple ? 'Puedes elegir varias' : 'Opcional'}>
+      {showDropzone && (
+        <div
+          className={`dropzone ${dropActive ? 'is-over' : ''}`}
+          role="button" tabIndex={0}
+          onClick={() => inputRef.current?.click()}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); inputRef.current?.click(); } }}
+          onDragOver={(e) => { if (dragIndex === null) { e.preventDefault(); setDropActive(true); } }}
+          onDragLeave={() => setDropActive(false)}
+          onDrop={(e) => { if (dragIndex === null) { e.preventDefault(); setDropActive(false); accept(e.dataTransfer.files); } }}
+        >
+          <Icon name="upload" />
+          <b>Arrastra {multiple ? 'tus imágenes' : 'una imagen'} aquí</b>
+          <small>o haz clic para explorar</small>
+        </div>
+      )}
       <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        multiple={multiple}
-        style={styles.input}
-        onChange={handleChange}
+        ref={inputRef} type="file" accept="image/*" multiple={multiple} className="sr-only" tabIndex={-1}
+        onChange={(e) => { accept(e.target.files); e.target.value = ''; }}
       />
+
       {multiple && fileList.length > 1 && (
-        <p style={styles.hint}>Arrastra las imagenes para cambiar el orden de publicacion</p>
+        <span className="field-hint">Arrastra las miniaturas para cambiar el orden de publicación.</span>
       )}
 
       {fileList.length > 0 && (
-        <div style={styles.previewGrid}>
-          {fileList.map((file, i) => (
+        <div className="previews">
+          {fileList.map((f, i) => (
             <div
-              key={`${file.name}-${file.size}-${i}`}
+              key={`${f.name}-${f.size}-${i}`}
+              className={`preview ${dragIndex === i ? 'is-dragging' : ''} ${overIndex === i && dragIndex !== i ? 'is-over' : ''}`}
               draggable={multiple && fileList.length > 1}
-              onDragStart={(e) => handleDragStart(e, i)}
-              onDragOver={(e) => handleDragOver(e, i)}
+              onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragOver={(e) => { if (dragIndex !== null) { e.preventDefault(); setOverIndex(i); } }}
               onDrop={(e) => handleDrop(e, i)}
-              onDragEnd={handleDragEnd}
-              style={{
-                ...styles.previewItem,
-                ...(dragIndex === i ? styles.previewItemDragging : {}),
-                ...(overIndex === i && dragIndex !== i ? styles.previewItemOver : {}),
-              }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
             >
-              {multiple && (
-                <span style={styles.orderBadge}>{i + 1}</span>
-              )}
-              <img
-                src={URL.createObjectURL(file)}
-                alt={`Preview ${i + 1}`}
-                style={styles.previewImage}
-              />
-              <button
-                type="button"
-                style={styles.removeBtn}
-                onClick={() => handleRemove(i)}
-                title="Quitar"
-              >
-                x
+              {multiple && <span className="preview-order">{i + 1}</span>}
+              <img src={urls[i]} alt={`Vista previa ${i + 1}`} />
+              <button type="button" className="preview-remove" onClick={() => handleRemove(i)} aria-label={`Quitar imagen ${i + 1}`}>
+                <Icon name="x" size="sm" />
               </button>
             </div>
           ))}
         </div>
       )}
 
-      {multiple && fileList.length > 0 && (
-        <button
-          type="button"
-          style={styles.clearBtn}
-          onClick={() => {
-            actualOnChange([]);
-            inputRef.current.value = '';
-          }}
-        >
-          Quitar todas las imagenes
+      {multiple && fileList.length > 1 && (
+        <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: 'flex-start', color: 'var(--danger)' }} onClick={() => actualOnChange([])}>
+          Quitar todas
         </button>
       )}
-    </div>
+    </Field>
   );
 }
